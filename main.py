@@ -7,34 +7,184 @@ from typing import Sequence, Tuple, Dict, Any
 import numpy as np
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, auto
+from collections import OrderedDict
 
 from data_manager import TrackmaniaDataManager, EventType, tokenize_block
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+class Material(Enum):
+    Concrete = auto()
+    Pavement = auto()
+    Grass = auto()
+    Ice = auto()
+    Metal = auto()
+    Sand = auto()
+    Dirt = auto()
+    Turbo_Deprecated = auto()
+    DirtRoad = auto()
+    Rubber = auto()
+    SlidingRubber = auto()
+    Test = auto()
+    Rock = auto()
+    Water = auto()
+    Wood = auto()
+    Danger = auto()
+    Asphalt = auto()
+    WetDirtRoad = auto()
+    WetAsphalt = auto()
+    WetPavement = auto()
+    WetGrass = auto()
+    Snow = auto()
+    ResonantMetal = auto()
+    GolfBall = auto()
+    GolfWall = auto()
+    GolfGround = auto()
+    Turbo2_Deprecated = auto()
+    Bumper_Deprecated = auto()
+    NotCollidable = auto()
+    FreeWheeling_Deprecated = auto()
+    TurboRoulette_Deprecated = auto()
+    WallJump = auto()
+    MetalTrans = auto()
+    Stone = auto()
+    Player = auto()
+    Trunk = auto()
+    TechLaser = auto()
+    SlidingWood = auto()
+    PlayerOnly = auto()
+    Tech = auto()
+    TechArmor = auto()
+    TechSafe = auto()
+    OffZone = auto()
+    Bullet = auto()
+    TechHook = auto()
+    TechGround = auto()
+    TechWall = auto()
+    TechArrow = auto()
+    TechHook2 = auto()
+    Forest = auto()
+    Wheat = auto()
+    TechTarget = auto()
+    PavementStair = auto()
+    TechTeleport = auto()
+    Energy = auto()
+    TechMagnetic = auto()
+    TurboTechMagnetic_Deprecated = auto()
+    Turbo2TechMagnetic_Deprecated = auto()
+    TurboWood_Deprecated = auto()
+    Turbo2Wood_Deprecated = auto()
+    FreeWheelingTechMagnetic_Deprecated = auto()
+    FreeWheelingWood_Deprecated = auto()
+    TechSuperMagnetic = auto()
+    TechNucleus = auto()
+    TechMagneticAccel = auto()
+    MetalFence = auto()
+    TechGravityChange = auto()
+    TechGravityReset = auto()
+    RubberBand = auto()
+    Gravel = auto()
+    Hack_NoGrip_Deprecated = auto()
+    Bumper2_Deprecated = auto()
+    NoSteering_Deprecated = auto()
+    NoBrakes_Deprecated = auto()
+    RoadIce = auto()
+    RoadSynthetic = auto()
+    Green = auto()
+    Plastic = auto()
+    DevDebug = auto()
+    Free3 = auto()
+    XXX_Null = auto()
+
+class ReactorBoostType(Enum):
+    NONE = auto()
+    Up = auto()
+    Down = auto()
+    UpAndDown = auto()
+
+class ReactorBoostLevel(Enum):
+    NONE = auto()
+    Lvl1 = auto()
+    Lvl2 = auto()
+
 # Define enums for input and output keys
 class InputKeys(Enum):
     TIME = 'Time'
     EVENT_TYPE = 'EventType'
-    INPUT_STEER = 'InputSteer'
-    INPUT_GAS = 'InputGasPedal'
-    INPUT_BRAKE = 'InputBrakePedal'
-    POSITION = 'Position'
-    VELOCITY = 'Velocity'
     BLOCK_HASH = 'BlockHash'
+    POSITION = 'Position'
+    LEFT = 'Left'
+    UP = 'Up'
+    DIR = 'Dir'
+    VELOCITY = 'Velocity'
+    WORLD_CAR_UP = 'WorldCarUp'
+    IS_GROUND_CONTACT = 'IsGroundContact'
+    IS_WHEELS_BURNING = 'IsWheelsBurning'
+    IS_REACTOR_GROUND_MODE = 'IsReactorGroundMode'
+    CUR_GEAR = 'CurGear'
+    FRONT_SPEED = 'FrontSpeed'
+    INPUT_STEER = 'InputSteer'
+    INPUT_GAS_PEDAL = 'InputGasPedal'
+    INPUT_BRAKE_PEDAL = 'InputBrakePedal'
+    FL_STEER_ANGLE = 'FLSteerAngle'
+    FL_WHEEL_ROT = 'FLWheelRot'
+    FL_WHEEL_ROT_SPEED = 'FLWheelRotSpeed'
+    FL_DAMPER_LEN = 'FLDamperLen'
+    FL_SLIP_COEF = 'FLSlipCoef'
+    FR_STEER_ANGLE = 'FRSteerAngle'
+    FR_WHEEL_ROT = 'FRWheelRot'
+    FR_WHEEL_ROT_SPEED = 'FRWheelRotSpeed'
+    FR_DAMPER_LEN = 'FRDamperLen'
+    FR_SLIP_COEF = 'FRSlipCoef'
+    RL_STEER_ANGLE = 'RLSteerAngle'
+    RL_WHEEL_ROT = 'RLWheelRot'
+    RL_WHEEL_ROT_SPEED = 'RLWheelRotSpeed'
+    RL_DAMPER_LEN = 'RLDamperLen'
+    RL_SLIP_COEF = 'RLSlipCoef'
+    RR_STEER_ANGLE = 'RRSteerAngle'
+    RR_WHEEL_ROT = 'RRWheelRot'
+    RR_WHEEL_ROT_SPEED = 'RRWheelRotSpeed'
+    RR_DAMPER_LEN = 'RRDamperLen'
+    RR_SLIP_COEF = 'RRSlipCoef'
+    FL_ICING = 'FLIcing01'
+    FR_ICING = 'FRIcing01'
+    RL_ICING = 'RLIcing01'
+    RR_ICING = 'RRIcing01'
+    FL_TIRE_WEAR = 'FLTireWear01'
+    FR_TIRE_WEAR = 'FRTireWear01'
+    RL_TIRE_WEAR = 'RLTireWear01'
+    RR_TIRE_WEAR = 'RRTireWear01'
+    FL_BREAK_NORMED_COEF = 'FLBreakNormedCoef'
+    FR_BREAK_NORMED_COEF = 'FRBreakNormedCoef'
+    RL_BREAK_NORMED_COEF = 'RLBreakNormedCoef'
+    RR_BREAK_NORMED_COEF = 'RRBreakNormedCoef'
+    FL_GROUND_CONTACT_MATERIAL = 'FLGroundContactMaterial'
+    FR_GROUND_CONTACT_MATERIAL = 'FRGroundContactMaterial'
+    RL_GROUND_CONTACT_MATERIAL = 'RLGroundContactMaterial'
+    RR_GROUND_CONTACT_MATERIAL = 'RRGroundContactMaterial'
+    REACTOR_AIR_CONTROL = 'ReactorAirControl'
+    REACTOR_INPUTS_X = 'ReactorInputsX'
+    REACTOR_BOOST_TYPE = 'ReactorBoostType'
+    REACTOR_BOOST_LVL = 'ReactorBoostLvl'
+    GROUND_DIST = 'GroundDist'
+    ENGINE_ON = 'EngineOn'
+    IS_TURBO = 'IsTurbo'
+    TURBO_TIME = 'TurboTime'
 
 class OutputKeys(Enum):
-    TIME = 'time'
-    INPUTS = 'inputs'
-    POSITION = 'position'
-    VELOCITY = 'velocity'
+    TIME = InputKeys.TIME.value
+    INPUT_STEER = InputKeys.INPUT_STEER.value
+    INPUT_GAS_PEDAL = InputKeys.INPUT_GAS_PEDAL.value
+    INPUT_BRAKE_PEDAL = InputKeys.INPUT_BRAKE_PEDAL.value
+    POSITION = InputKeys.POSITION.value
+    VELOCITY = InputKeys.VELOCITY.value
     EVENT_TYPE = 'event_type'
-    BLOCK_NAME = 'block_name'
-    BLOCK_POSITION = 'block_position'
-    BLOCK_DIRECTION = 'block_direction'
-    PAGE_NAME = 'page_name'
+    BLOCK_NAME = 'block/Name'
+    BLOCK_POSITION = 'block/Position'
+    BLOCK_DIRECTION = 'block/Direction'
+    BLOCK_PAGE_NAME = 'block/PageName'
 
 # Centralized configuration for inputs and outputs
 @dataclass
@@ -42,27 +192,82 @@ class ModelConfig:
     input_features: Dict[str, Any] = field(default_factory=lambda: {
         'numerical': [
             {'key': InputKeys.TIME.value, 'size': 1},
-            {'key': InputKeys.INPUT_STEER.value, 'size': 1},
-            {'key': InputKeys.INPUT_GAS.value, 'size': 1},
-            {'key': InputKeys.INPUT_BRAKE.value, 'size': 1},
             {'key': InputKeys.POSITION.value, 'size': 3},
             {'key': InputKeys.VELOCITY.value, 'size': 3},
+            {'key': InputKeys.LEFT.value, 'size': 3},
+            {'key': InputKeys.UP.value, 'size': 3},
+            {'key': InputKeys.DIR.value, 'size': 3},
+            {'key': InputKeys.WORLD_CAR_UP.value, 'size': 3},
+            {'key': InputKeys.CUR_GEAR.value, 'size': 1},
+            {'key': InputKeys.FRONT_SPEED.value, 'size': 1},
+            {'key': InputKeys.INPUT_STEER.value, 'size': 1},
+            {'key': InputKeys.INPUT_GAS_PEDAL.value, 'size': 1},
+            {'key': InputKeys.INPUT_BRAKE_PEDAL.value, 'size': 1},
+            {'key': InputKeys.FL_STEER_ANGLE.value, 'size': 1},
+            {'key': InputKeys.FL_WHEEL_ROT.value, 'size': 1},
+            {'key': InputKeys.FL_WHEEL_ROT_SPEED.value, 'size': 1},
+            {'key': InputKeys.FL_DAMPER_LEN.value, 'size': 1},
+            {'key': InputKeys.FL_SLIP_COEF.value, 'size': 1},
+            {'key': InputKeys.FR_STEER_ANGLE.value, 'size': 1},
+            {'key': InputKeys.FR_WHEEL_ROT.value, 'size': 1},
+            {'key': InputKeys.FR_WHEEL_ROT_SPEED.value, 'size': 1},
+            {'key': InputKeys.FR_DAMPER_LEN.value, 'size': 1},
+            {'key': InputKeys.FR_SLIP_COEF.value, 'size': 1},
+            {'key': InputKeys.RL_STEER_ANGLE.value, 'size': 1},
+            {'key': InputKeys.RL_WHEEL_ROT.value, 'size': 1},
+            {'key': InputKeys.RL_WHEEL_ROT_SPEED.value, 'size': 1},
+            {'key': InputKeys.RL_DAMPER_LEN.value, 'size': 1},
+            {'key': InputKeys.RL_SLIP_COEF.value, 'size': 1},
+            {'key': InputKeys.RR_STEER_ANGLE.value, 'size': 1},
+            {'key': InputKeys.RR_WHEEL_ROT.value, 'size': 1},
+            {'key': InputKeys.RR_WHEEL_ROT_SPEED.value, 'size': 1},
+            {'key': InputKeys.RR_DAMPER_LEN.value, 'size': 1},
+            {'key': InputKeys.RR_SLIP_COEF.value, 'size': 1},
+            {'key': InputKeys.FL_ICING.value, 'size': 1},
+            {'key': InputKeys.FR_ICING.value, 'size': 1},
+            {'key': InputKeys.RL_ICING.value, 'size': 1},
+            {'key': InputKeys.RR_ICING.value, 'size': 1},
+            {'key': InputKeys.FL_TIRE_WEAR.value, 'size': 1},
+            {'key': InputKeys.FR_TIRE_WEAR.value, 'size': 1},
+            {'key': InputKeys.RL_TIRE_WEAR.value, 'size': 1},
+            {'key': InputKeys.RR_TIRE_WEAR.value, 'size': 1},
+            {'key': InputKeys.FL_BREAK_NORMED_COEF.value, 'size': 1},
+            {'key': InputKeys.FR_BREAK_NORMED_COEF.value, 'size': 1},
+            {'key': InputKeys.RL_BREAK_NORMED_COEF.value, 'size': 1},
+            {'key': InputKeys.RR_BREAK_NORMED_COEF.value, 'size': 1},
+            {'key': InputKeys.REACTOR_AIR_CONTROL.value, 'size': 3},
+            {'key': InputKeys.GROUND_DIST.value, 'size': 1},
+            {'key': InputKeys.REACTOR_INPUTS_X.value, 'size': 1},
+            {'key': InputKeys.IS_GROUND_CONTACT.value, 'size': 1},
+            {'key': InputKeys.IS_WHEELS_BURNING.value, 'size': 1},
+            {'key': InputKeys.IS_REACTOR_GROUND_MODE.value, 'size': 1},
+            {'key': InputKeys.ENGINE_ON.value, 'size': 1},
+            {'key': InputKeys.IS_TURBO.value, 'size': 1},
+            {'key': InputKeys.TURBO_TIME.value, 'size': 1},
         ],
         'categorical': [
             {'key': InputKeys.EVENT_TYPE.value, 'size': len(EventType)},
+            {'key': InputKeys.FL_GROUND_CONTACT_MATERIAL.value, 'size': len(Material)},
+            {'key': InputKeys.FR_GROUND_CONTACT_MATERIAL.value, 'size': len(Material)},
+            {'key': InputKeys.RL_GROUND_CONTACT_MATERIAL.value, 'size': len(Material)},
+            {'key': InputKeys.RR_GROUND_CONTACT_MATERIAL.value, 'size': len(Material)},
+            {'key': InputKeys.REACTOR_BOOST_TYPE.value, 'size': len(ReactorBoostType)},
+            {'key': InputKeys.REACTOR_BOOST_LVL.value, 'size': len(ReactorBoostLevel)},
         ]
     })
-    output_features: Dict[str, Any] = field(default_factory=lambda: {
-        OutputKeys.TIME.value: {'size': 1},
-        OutputKeys.INPUTS.value: {'size': 3},
-        OutputKeys.POSITION.value: {'size': 3},
-        OutputKeys.VELOCITY.value: {'size': 3},
-        OutputKeys.EVENT_TYPE.value: {'size': len(EventType)},
-        OutputKeys.BLOCK_NAME.value: {'size': None},  # Size to be set based on data
-        OutputKeys.PAGE_NAME.value: {'size': None},  # Size to be set based on data
-        OutputKeys.BLOCK_POSITION.value: {'size': 3},
-        OutputKeys.BLOCK_DIRECTION.value: {'size': 5},
-    })
+    output_features: OrderedDict[str, Any] = field(default_factory=lambda: OrderedDict([
+        (OutputKeys.TIME.value, {'size': 1}),
+        (OutputKeys.INPUT_STEER.value, {'size': 1}),
+        (OutputKeys.INPUT_GAS_PEDAL.value, {'size': 1}),
+        (OutputKeys.INPUT_BRAKE_PEDAL.value, {'size': 1}),
+        (OutputKeys.POSITION.value, {'size': 3}),
+        (OutputKeys.VELOCITY.value, {'size': 3}),
+        (OutputKeys.EVENT_TYPE.value, {'size': len(EventType)}),
+        (OutputKeys.BLOCK_NAME.value, {'size': None}),
+        (OutputKeys.BLOCK_PAGE_NAME.value, {'size': None}),
+        (OutputKeys.BLOCK_POSITION.value, {'size': 3}),
+        (OutputKeys.BLOCK_DIRECTION.value, {'size': 5}),
+    ]))
     block_features: Dict[str, Any] = field(default_factory=lambda: {
         'PageName': {'size': None},  # Size to be set based on data
         'MaterialName': {'size': None},  # Size to be set based on data
@@ -116,6 +321,23 @@ def get_block_data_for_hashes(block_hashes: np.ndarray, tokenized_blocks: Dict[s
         field_values[field] = np.array(field_values[field])
     return field_values
 
+
+def get_feature_indices(feature_key: str) -> slice:
+    start_idx = 0
+    for feature in config.input_features['numerical']:
+        key = feature['key']
+        size = feature['size']
+        if key == feature_key:
+            return slice(start_idx, start_idx + size)
+        start_idx += size
+    for feature in config.input_features['categorical']:
+        key = feature['key']
+        size = feature['size']
+        if key == feature_key:
+            return slice(start_idx, start_idx + size)
+        start_idx += size
+    raise ValueError(f"Feature {feature_key} not found in input features.")
+
 class DataProcessor:
     def __init__(self, manager: TrackmaniaDataManager, map_uid: str, config: ModelConfig):
         self.manager = manager
@@ -141,7 +363,7 @@ class DataProcessor:
     def update_config_sizes(self):
         # Update sizes in config based on tokenizers
         self.config.output_features[OutputKeys.BLOCK_NAME.value]['size'] = len(self.tokenizers.get('Name', {}))
-        self.config.output_features[OutputKeys.PAGE_NAME.value]['size'] = len(self.tokenizers.get('PageName', {}))
+        self.config.output_features[OutputKeys.BLOCK_PAGE_NAME.value]['size'] = len(self.tokenizers.get('PageName', {}))
         for block_feature in ['PageName', 'MaterialName', 'Name']:
             tokenizer_size = len(self.tokenizers.get(block_feature, {}))
             if tokenizer_size == 0:
@@ -169,8 +391,8 @@ class DataProcessor:
             return global_stats
 
     def calculate_global_stats(self, numeric_data: np.ndarray) -> Tuple[np.ndarray, ...]:
-        position_indices = self.get_feature_indices('Position')
-        velocity_indices = self.get_feature_indices('Velocity')
+        position_indices = get_feature_indices('Position')
+        velocity_indices = get_feature_indices('Velocity')
 
         position_data = numeric_data[..., position_indices].reshape(-1, 3)
         velocity_data = numeric_data[..., velocity_indices].reshape(-1, 3)
@@ -180,22 +402,6 @@ class DataProcessor:
         global_velocity_mean = np.mean(velocity_data, axis=0)
         global_velocity_std = np.std(velocity_data, axis=0)
         return global_position_mean, global_position_std, global_velocity_mean, global_velocity_std
-
-    def get_feature_indices(self, feature_key: str) -> slice:
-        start_idx = 0
-        for feature in self.config.input_features['numerical']:
-            key = feature['key']
-            size = feature['size']
-            if key == feature_key:
-                return slice(start_idx, start_idx + size)
-            start_idx += size
-        for feature in self.config.input_features['categorical']:
-            key = feature['key']
-            size = feature['size']
-            if key == feature_key:
-                return slice(start_idx, start_idx + size)
-            start_idx += size
-        raise ValueError(f"Feature {feature_key} not found in input features.")
 
     def process_and_normalize_data(self, inputs: np.ndarray, targets: np.ndarray) -> Dict[str, Any]:
         processed_inputs = self.preprocess_data(inputs)
@@ -226,6 +432,8 @@ class DataProcessor:
         block_hashes = data[InputKeys.BLOCK_HASH.value][block_indices]
         block_field_values = get_block_data_for_hashes(block_hashes, self.tokenized_blocks, self.config)
 
+        global_position_mean, global_position_std, _, _ = self.get_or_compute_global_stats(data)
+
         num_sequences, sequence_length = event_types.shape
         block_data_shape = (num_sequences, sequence_length)
         block_data = {}
@@ -243,7 +451,7 @@ class DataProcessor:
                 one_hot_direction = np.eye(5)[block_field_values[field]]
                 block_data[field][block_indices[0], block_indices[1]] = one_hot_direction
             elif field == 'Position':
-                block_data[field][block_indices[0], block_indices[1]] = block_field_values[field]
+                block_data[field][block_indices[0], block_indices[1]] = (block_field_values[field] - global_position_mean) / (global_position_std + 1e-8)
             else:
                 block_data[field][block_indices[0], block_indices[1]] = block_field_values[field]
             block_data[field] = jnp.array(block_data[field])
@@ -254,11 +462,11 @@ class DataProcessor:
             'event_type': jnp.array(event_types_one_hot)
         }
 
-    def normalize_data(self, data: jnp.ndarray) -> Dict[str, jnp.ndarray]:
+    def normalize_data(self, data: jnp.ndarray) -> jnp.ndarray:
         global_position_mean, global_position_std, global_velocity_mean, global_velocity_std = self.global_stats
-        time_idx = self.get_feature_indices(InputKeys.TIME.value)
-        position_idx = self.get_feature_indices('Position')
-        velocity_idx = self.get_feature_indices('Velocity')
+        time_idx = get_feature_indices(InputKeys.TIME.value)
+        position_idx = get_feature_indices(InputKeys.POSITION.value)
+        velocity_idx = get_feature_indices(InputKeys.VELOCITY.value)
 
         time = data[..., time_idx]
         numerical_features = data[..., :]
@@ -270,9 +478,9 @@ class DataProcessor:
         # Reconstruct normalized numerical data
         normalized_numerical = jnp.concatenate([
             time_normalized,
-            numerical_features[..., 1:position_idx.start],
             position_normalized,
-            velocity_normalized
+            velocity_normalized,
+            numerical_features[..., velocity_idx.stop:]
         ], axis=-1)
 
         return normalized_numerical
@@ -314,7 +522,7 @@ class BasicTrackmaniaNN(nn.Module):
             x = nn.relu(layer(x))
 
         # Outputs
-        outputs = {}
+        outputs = OrderedDict()
         for output_name, properties in self.config.output_features.items():
             size = properties['size']
             outputs[output_name] = nn.Dense(size)(x)
@@ -358,17 +566,22 @@ def create_batches(data: Dict[str, Any], batch_size: int):
 @jax.jit
 def custom_loss(predictions, targets, loss_weights, output_features: Dict[str, Any]):
     total_loss = 0.0
+    # debug_str = ''
     for output_name, properties in output_features.items():
         size = properties['size']
         pred = predictions[output_name]
-        if output_name in targets['numerical']:
+        if output_name in targets['numerical']: # Normalized
             true = targets['numerical'][..., :size]
-        elif output_name in targets:
-            true = targets[output_name]
+        # Block data
+        elif output_name.startswith('block/'):
+            true = targets['blocks'][output_name.split('/')[1]]
+        elif output_name == OutputKeys.EVENT_TYPE.value:
+            true = targets['event_type']
         else:
-            continue
-        
-        if output_name in [OutputKeys.BLOCK_NAME.value, OutputKeys.PAGE_NAME.value]:
+            idx = get_feature_indices(output_name)
+            true = targets['numerical'][..., idx]
+
+        if output_name in [OutputKeys.BLOCK_NAME.value, OutputKeys.BLOCK_PAGE_NAME.value]:
             loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(pred, true))
         elif output_name in [OutputKeys.EVENT_TYPE.value, OutputKeys.BLOCK_DIRECTION.value]:
             loss = jnp.mean(optax.softmax_cross_entropy(pred, true))
@@ -376,7 +589,10 @@ def custom_loss(predictions, targets, loss_weights, output_features: Dict[str, A
             # Mean squared error loss
             loss = jnp.mean((pred - true) ** 2)
         
+        # debug_str += f"{output_name}: {jax.device_get(loss).item()*loss_weights.get(output_name, 1.0):.4f}, "
         total_loss += loss_weights.get(output_name, 1.0) * loss
+
+    # print(debug_str)
     return total_loss
 
 @jax.jit
@@ -393,8 +609,7 @@ def eval_step(state, batch, loss_weights, output_features: Dict[str, Any]):
     predictions = state.apply_fn({'params': state.params}, batch['inputs'], batch['blocks'], batch['event_type'])
     return custom_loss(predictions, batch['targets'], loss_weights, output_features)
 
-
-def calculate_accuracy(predictions, targets, config):
+def calculate_accuracy(predictions, targets):
     accuracies = {}
     
     # Event Type Accuracy
@@ -410,13 +625,13 @@ def calculate_accuracy(predictions, targets, config):
     accuracies['block_name'] = float(block_name_acc)
 
     # Page Name Accuracy
-    page_name_pred = jnp.argmax(predictions[OutputKeys.PAGE_NAME.value], axis=-1)
+    page_name_pred = jnp.argmax(predictions[OutputKeys.BLOCK_PAGE_NAME.value], axis=-1)
     page_name_true = targets['blocks']['PageName']
     page_name_acc = jnp.mean(page_name_pred == page_name_true)
     accuracies['page_name'] = float(page_name_acc)
     
     # Block Position Accuracy (using a threshold)
-    position_threshold = 0.1  # Adjust as needed
+    position_threshold = 1  # Adjust as needed
     block_position_pred = predictions[OutputKeys.BLOCK_POSITION.value]
     block_position_true = targets['blocks']['Position']
     position_correct = jnp.sum(jnp.abs(block_position_pred - block_position_true) < position_threshold, axis=-1) == 3
@@ -452,7 +667,7 @@ def evaluate_accuracy(state, data, config, batch_size=32):
         }
     }
     
-    return calculate_accuracy(combined_predictions, combined_targets, config)
+    return calculate_accuracy(combined_predictions, combined_targets)
 
 
 
@@ -477,18 +692,20 @@ state = create_train_state(rng, model, learning_rate=0.01, input_shape=input_sha
 loss_weights = {
     OutputKeys.POSITION.value: 0.01,
     OutputKeys.VELOCITY.value: 0.01,
-    OutputKeys.EVENT_TYPE.value: 1,
-    OutputKeys.TIME.value: 0.00001,
-    OutputKeys.BLOCK_NAME.value: 1.0,
-    OutputKeys.PAGE_NAME.value: 1.0,
+    OutputKeys.EVENT_TYPE.value: 10,
+    OutputKeys.TIME.value: 0.0001,
+    OutputKeys.BLOCK_NAME.value: 5.0,
+    OutputKeys.BLOCK_PAGE_NAME.value: 5.0,
     OutputKeys.BLOCK_POSITION.value: 0.01,
     OutputKeys.BLOCK_DIRECTION.value: 1,
-    OutputKeys.INPUTS.value: 1.0
+    OutputKeys.INPUT_STEER.value: 0.01,
+    OutputKeys.INPUT_GAS_PEDAL.value: 0.1,
+    OutputKeys.INPUT_BRAKE_PEDAL.value: 0.1
 }
 
 # Training loop
 num_epochs = 1000
-batch_size = 32
+batch_size = 64
 
 for epoch in range(num_epochs):
     batch_losses = []
@@ -498,16 +715,17 @@ for epoch in range(num_epochs):
     train_loss = jnp.mean(jnp.array(batch_losses))
 
     # Evaluation (optional)
-    eval_losses = []
-    for batch in create_batches(test_data, batch_size):
-        loss = eval_step(state, batch, loss_weights, config.output_features)
-        eval_losses.append(loss)
-    test_loss = jnp.mean(jnp.array(eval_losses))
+    # eval_losses = []
+    # for batch in create_batches(test_data, batch_size):
+    #     loss = eval_step(state, batch, loss_weights, config.output_features)
+    #     eval_losses.append(loss)
+    # test_loss = jnp.mean(jnp.array(eval_losses))
 
     
     test_accuracy = evaluate_accuracy(state, test_data, config)
 
-    logger.info(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}")
+    # logger.info(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}")
+    logger.info(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}")
     logger.info(f"  Accuracies: 'Event Type': {test_accuracy['event_type']:.4f}, 'Block Name': {test_accuracy['block_name']:.4f}, 'Page Name': {test_accuracy['page_name']:.4f}, 'Block Position': {test_accuracy['block_position']:.4f}, 'Block Direction': {test_accuracy['block_direction']:.4f}")
 
 # Optional: Save the trained model parameters
