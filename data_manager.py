@@ -1,15 +1,6 @@
 import json
 import numpy as np
 import h5py
-from enum import IntEnum
-
-
-class EventType(IntEnum):
-    BLOCK_ENTER = 0
-    BLOCK_EXIT = 1
-    INPUT_CHANGE = 2
-    CHECKPOINT = 3
-    FINISH = 4
 
 class TrackmaniaDataManager:
     def __init__(self, filename):
