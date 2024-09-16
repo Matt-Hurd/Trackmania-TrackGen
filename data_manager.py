@@ -94,14 +94,14 @@ class TrackmaniaDataManager:
             ('EngineOn', 'int32'),
             ('IsTurbo', 'int32'),
             ('TurboTime', 'float32'),
-            ('BlockHash', h5py.special_dtype(vlen=str)),
-            ('EventType', 'uint8'),
+            ('ReactorBoostType', 'int32'),
+            ('ReactorBoostLvl', 'int32'),
             ('FLGroundContactMaterial', 'int32'),
             ('FRGroundContactMaterial', 'int32'),
             ('RLGroundContactMaterial', 'int32'),
             ('RRGroundContactMaterial', 'int32'),
-            ('ReactorBoostType', 'int32'),
-            ('ReactorBoostLvl', 'int32'),
+            ('EventType', 'uint8'),
+            ('BlockHash', h5py.special_dtype(vlen=str)),
         ])
         events_dataset = replay_group.create_dataset('events', (len(replay_data),), dtype=events_dtype)
 
@@ -162,14 +162,14 @@ class TrackmaniaDataManager:
                 1 if position['EngineOn'] else 0,
                 1 if position['IsTurbo'] else 0,
                 position['TurboTime'],
-                frame['BlockHash'],
-                frame['Type'],
+                position['ReactorBoostType'],
+                position['ReactorBoostLvl'],
                 position['FLGroundContactMaterial'],
                 position['FRGroundContactMaterial'],
                 position['RLGroundContactMaterial'],
                 position['RRGroundContactMaterial'],
-                position['ReactorBoostType'],
-                position['ReactorBoostLvl'],
+                frame['Type'],
+                frame['BlockHash'],
             )
 
         return replay_group
@@ -313,20 +313,20 @@ class TrackmaniaDataManager:
                 block_data = blocks_group[block_id]
                 blocks[block_id] = {
                     'BlockHash': block_id,
-                    'Position': block_data['Position'][()],
-                    'Name': block_data.attrs['Name'],
+                    'BlockPosition': block_data['Position'][()],
+                    'BlockName': block_data.attrs['Name'],
                     'BlockInfoVariantIndex': block_data.attrs['BlockInfoVariantIndex'],
-                    'Direction': block_data.attrs['Direction'],
-                    'PageName': block_data.attrs['PageName'],
-                    'MaterialName': block_data.attrs['MaterialName'],
-                    'CollectionId': block_data.attrs['CollectionId']
+                    'BlockDirection': block_data.attrs['Direction'],
+                    'BlockPageName': block_data.attrs['PageName'],
+                    'BlockMaterialName': block_data.attrs['MaterialName'],
+                    'BlockCollectionId': block_data.attrs['CollectionId']
                 }
             else:
                 print(f"Warning: Block {block_id} not found in blocks_group.")
                 # Handle missing blocks if necessary
 
         # Create tokenizers using only the loaded blocks
-        tokenizers = self.create_tokenizers(blocks, ['Name', 'BlockHash', 'PageName', 'MaterialName', 'CollectionId'])
+        tokenizers = self.create_tokenizers(blocks, ['BlockName', 'BlockHash', 'BlockPageName', 'BlockMaterialName', 'BlockCollectionId'])
         tokenized_blocks = {block_id: tokenize_block(block_data, tokenizers) for block_id, block_data in blocks.items()}
 
         # Save the generated tokenizers and tokenized blocks into HDF5

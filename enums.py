@@ -1,5 +1,11 @@
 from enum import Enum, auto, IntEnum
 
+class EncodingType(Enum):
+    NUMERICAL = auto()
+    ONE_HOT = auto()
+    TOKENIZED = auto()
+    NONE = auto()
+
 class Material(Enum):
     Concrete = auto()
     Pavement = auto()
@@ -94,85 +100,16 @@ class ReactorBoostLevel(Enum):
     Lvl1 = auto()
     Lvl2 = auto()
 
-class InputKeys(Enum):
-    TIME = 'Time'
-    EVENT_TYPE = 'EventType'
-    BLOCK_HASH = 'BlockHash'
-    POSITION = 'Position'
-    LEFT = 'Left'
-    UP = 'Up'
-    DIR = 'Dir'
-    VELOCITY = 'Velocity'
-    WORLD_CAR_UP = 'WorldCarUp'
-    IS_GROUND_CONTACT = 'IsGroundContact'
-    IS_WHEELS_BURNING = 'IsWheelsBurning'
-    IS_REACTOR_GROUND_MODE = 'IsReactorGroundMode'
-    CUR_GEAR = 'CurGear'
-    FRONT_SPEED = 'FrontSpeed'
-    INPUT_STEER = 'InputSteer'
-    INPUT_GAS_PEDAL = 'InputGasPedal'
-    INPUT_BRAKE_PEDAL = 'InputBrakePedal'
-    FL_STEER_ANGLE = 'FLSteerAngle'
-    FL_WHEEL_ROT = 'FLWheelRot'
-    FL_WHEEL_ROT_SPEED = 'FLWheelRotSpeed'
-    FL_DAMPER_LEN = 'FLDamperLen'
-    FL_SLIP_COEF = 'FLSlipCoef'
-    FR_STEER_ANGLE = 'FRSteerAngle'
-    FR_WHEEL_ROT = 'FRWheelRot'
-    FR_WHEEL_ROT_SPEED = 'FRWheelRotSpeed'
-    FR_DAMPER_LEN = 'FRDamperLen'
-    FR_SLIP_COEF = 'FRSlipCoef'
-    RL_STEER_ANGLE = 'RLSteerAngle'
-    RL_WHEEL_ROT = 'RLWheelRot'
-    RL_WHEEL_ROT_SPEED = 'RLWheelRotSpeed'
-    RL_DAMPER_LEN = 'RLDamperLen'
-    RL_SLIP_COEF = 'RLSlipCoef'
-    RR_STEER_ANGLE = 'RRSteerAngle'
-    RR_WHEEL_ROT = 'RRWheelRot'
-    RR_WHEEL_ROT_SPEED = 'RRWheelRotSpeed'
-    RR_DAMPER_LEN = 'RRDamperLen'
-    RR_SLIP_COEF = 'RRSlipCoef'
-    FL_ICING = 'FLIcing01'
-    FR_ICING = 'FRIcing01'
-    RL_ICING = 'RLIcing01'
-    RR_ICING = 'RRIcing01'
-    FL_TIRE_WEAR = 'FLTireWear01'
-    FR_TIRE_WEAR = 'FRTireWear01'
-    RL_TIRE_WEAR = 'RLTireWear01'
-    RR_TIRE_WEAR = 'RRTireWear01'
-    FL_BREAK_NORMED_COEF = 'FLBreakNormedCoef'
-    FR_BREAK_NORMED_COEF = 'FRBreakNormedCoef'
-    RL_BREAK_NORMED_COEF = 'RLBreakNormedCoef'
-    RR_BREAK_NORMED_COEF = 'RRBreakNormedCoef'
-    FL_GROUND_CONTACT_MATERIAL = 'FLGroundContactMaterial'
-    FR_GROUND_CONTACT_MATERIAL = 'FRGroundContactMaterial'
-    RL_GROUND_CONTACT_MATERIAL = 'RLGroundContactMaterial'
-    RR_GROUND_CONTACT_MATERIAL = 'RRGroundContactMaterial'
-    REACTOR_AIR_CONTROL = 'ReactorAirControl'
-    REACTOR_INPUTS_X = 'ReactorInputsX'
-    REACTOR_BOOST_TYPE = 'ReactorBoostType'
-    REACTOR_BOOST_LVL = 'ReactorBoostLvl'
-    GROUND_DIST = 'GroundDist'
-    ENGINE_ON = 'EngineOn'
-    IS_TURBO = 'IsTurbo'
-    TURBO_TIME = 'TurboTime'
-
-class OutputKeys(Enum):
-    TIME = InputKeys.TIME.value
-    INPUT_STEER = InputKeys.INPUT_STEER.value
-    INPUT_GAS_PEDAL = InputKeys.INPUT_GAS_PEDAL.value
-    INPUT_BRAKE_PEDAL = InputKeys.INPUT_BRAKE_PEDAL.value
-    POSITION = InputKeys.POSITION.value
-    VELOCITY = InputKeys.VELOCITY.value
-    EVENT_TYPE = 'event_type'
-    BLOCK_NAME = 'block/Name'
-    BLOCK_POSITION = 'block/Position'
-    BLOCK_DIRECTION = 'block/Direction'
-    BLOCK_PAGE_NAME = 'block/PageName'
-
 class EventType(IntEnum):
     BLOCK_ENTER = 0
     BLOCK_EXIT = 1
     INPUT_CHANGE = 2
     CHECKPOINT = 3
     FINISH = 4
+
+class BlockDirection(IntEnum):
+    NORTH = 0
+    EAST = 1
+    SOUTH = 2
+    WEST = 3
+    NONE = 4
