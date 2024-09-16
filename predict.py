@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from features import Features, EncodingType
 from typing import Any
 
-from config import loss_weights, logger
+from config import loss_weights
 
 PREDICT_DIR = './predictions'
 os.makedirs(PREDICT_DIR, exist_ok=True)

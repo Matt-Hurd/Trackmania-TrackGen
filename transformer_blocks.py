@@ -39,12 +39,14 @@ class TransformerEncoderBlock(nn.Module):
 
     def __call__(self, x, train: bool = True):
         # Self-Attention Block
-        attn_output = self.self_attention(x, x, x)
+        norm_x = self.layer_norm1(x)
+        attn_output = self.self_attention(norm_x, norm_x, norm_x)
         attn_output = self.dropout1(attn_output, deterministic=not train)
         x = x + attn_output
 
         # Feed-Forward Network (FFN) Block
-        ffn_output = self.ffn(self.layer_norm2(x))
+        norm_x = self.layer_norm2(x)
+        ffn_output = self.ffn(norm_x)
         ffn_output = self.dropout2(ffn_output, deterministic=not train)
         x = x + ffn_output
 

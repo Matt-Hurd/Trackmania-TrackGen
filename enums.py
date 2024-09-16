@@ -108,8 +108,8 @@ class EventType(IntEnum):
     FINISH = 4
 
 class BlockDirection(IntEnum):
-    NORTH = 0
-    EAST = 1
-    SOUTH = 2
-    WEST = 3
-    NONE = 4
+    NONE = auto()
+    NORTH = auto()
+    EAST = auto()
+    SOUTH = auto()
+    WEST = auto()

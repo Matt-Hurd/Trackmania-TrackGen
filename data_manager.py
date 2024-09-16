@@ -2,6 +2,8 @@ import json
 import numpy as np
 import h5py
 
+from enums import EventType
+
 class TrackmaniaDataManager:
     def __init__(self, filename):
         self.filename = filename
@@ -392,6 +394,28 @@ class TrackmaniaDataManager:
             'MaxY': max_y,
             'MaxZ': max_z
         }
+    
+    def get_first_x_events_with_block_data(self, map_uid: str, replay_name: str, x: int):
+        """
+        Get the first `x` events for the given `y` replay (including block data).
+        
+        Args:
+            map_uid (str): The unique identifier for the map.
+            replay_name (str): The replay to get events from.
+            x (int): The number of events to retrieve.
+            
+        Returns:
+            Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]: A tuple with the event data and corresponding block data.
+        """
+        # Access the map group and replay group
+        map_group = self.file[f'maps/{map_uid}']
+        replay_group = map_group[replay_name]
+
+        # Get all the events from the replay group and select the first `x` events
+        events = replay_group['events'][:x]
+
+        return events
+
 
 def tokenize_block(block, tokenizers):
     tokenized_block = {}

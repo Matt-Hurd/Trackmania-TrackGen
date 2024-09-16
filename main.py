@@ -1,3 +1,4 @@
+import logging
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -11,16 +12,22 @@ from enums import EncodingType, EventType
 from features import Features
 from flax.training import checkpoints
 
-from config import logger, loss_weights
+from config import loss_weights
 
 from data_manager import TrackmaniaDataManager
 from positional_encoding import PositionalEncoding
 from predict import collect_and_save_predictions, predict_single_batch
 from transformer_blocks import TransformerConfig, TransformerEncoderBlock
 
+import os
+
 CHECKPOINT_DIR = './checkpoints'
+CHECKPOINT_DIR = os.path.abspath(CHECKPOINT_DIR)
 CHECKPOINT_PREFIX = 'train_state'
 CHECKPOINT_MAX_TO_KEEP = 5
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ModelConfig:
@@ -34,6 +41,8 @@ class ModelConfig:
     attention_dropout_rate: float = 0.1
     dtype: Any = jnp.bfloat16
     deterministic: bool = False
+    warmup_epochs = 5
+    num_epochs = 1000
 
 
 def get_default_block_values() -> Dict[str, Any]:
@@ -42,7 +51,7 @@ def get_default_block_values() -> Dict[str, Any]:
         Features.BLOCK_MATERIAL_NAME.name: 0,
         Features.BLOCK_NAME.name: 0,
         Features.BLOCK_POSITION.name: np.zeros(3, dtype=np.float32),
-        Features.BLOCK_DIRECTION.name: 5
+        Features.BLOCK_DIRECTION.name: 0
     }
 
 def extract_numerical_fields(data: Dict[str, np.ndarray]) -> np.ndarray:
@@ -73,7 +82,7 @@ def get_block_data_for_hashes(block_hashes: np.ndarray, tokenized_blocks: Dict[s
     return field_values
 
 class DataProcessor:
-    def __init__(self, manager: TrackmaniaDataManager, map_uid: str):
+    def __init__(self, manager: TrackmaniaDataManager, map_uid: str, config: ModelConfig):
         self.manager = manager
         self.map_uid = map_uid
         self.config = config
@@ -195,7 +204,10 @@ class DataProcessor:
                     continue
                 value = block_field_values[feature.name][idx]
                 if feature.encoding == EncodingType.ONE_HOT:
-                    block_data[feature.name][sample_idx, timestep_idx] = np.eye(feature.size)[value]
+                    if feature == Features.BLOCK_DIRECTION: # HACK
+                        block_data[feature.name][sample_idx, timestep_idx] = np.eye(feature.size)[value + 1]
+                    else:
+                        block_data[feature.name][sample_idx, timestep_idx] = np.eye(feature.size)[value]
                 else:
                     block_data[feature.name][sample_idx, timestep_idx] = value
 
@@ -218,11 +230,11 @@ class DataProcessor:
 
         # Normalize position
         position = data[Features.POSITION.name]
-        data[Features.POSITION.name] = (position - global_position_mean) / (global_position_std + 1e-8)
+        data[Features.POSITION.name] = (position - global_position_mean) # / (global_position_std + 1e-8)
 
         # Normalize velocity
         velocity = data[Features.VELOCITY.name]
-        data[Features.VELOCITY.name] = (velocity - global_velocity_mean) / (global_velocity_std + 1e-8)
+        data[Features.VELOCITY.name] = (velocity - global_velocity_mean) # / (global_velocity_std + 1e-8)
 
 class BasicTrackmaniaNN(nn.Module):
     config: ModelConfig
@@ -230,26 +242,26 @@ class BasicTrackmaniaNN(nn.Module):
 
     def setup(self):
         # Block embeddings
-        block_embeddings = {}
-        for feature in Features.get_block_features():
-            if feature.encoding == EncodingType.TOKENIZED:
-                block_embeddings[feature.name] = nn.Embed(
-                    num_embeddings=feature.size,  # Vocabulary size
-                    features=self.config.block_embedding_dim
-                )
-        self.block_embeddings = block_embeddings
+        self.block_embeddings = {
+            feature.name: nn.Embed(
+                num_embeddings=feature.size,
+                features=self.config.block_embedding_dim
+            )
+            for feature in Features.get_block_features()
+            if feature.encoding == EncodingType.TOKENIZED
+        }
         
         # Calculate total block embedding dimension
-        total_block_emb_dim = sum(
-            self.config.block_embedding_dim if feature.encoding == EncodingType.TOKENIZED else feature.size
-            for feature in Features.get_block_features() if feature.encoding != EncodingType.NONE
-        )
+        # total_block_emb_dim = sum(
+        #     self.config.block_embedding_dim if feature.encoding == EncodingType.TOKENIZED else feature.size
+        #     for feature in Features.get_block_features() if feature.encoding != EncodingType.NONE
+        # )
         
         # Initial Dense layer to project input features to d_model
         self.input_projection = nn.Dense(self.config.d_model, use_bias=False)
         
         # Positional Encoding
-        self.positional_encoding = PositionalEncoding(d_model=self.config.d_model, max_len=self.max_seq_length)
+        self.positional_encoding = PositionalEncoding(d_model=self.config.d_model)
         
         # Transformer Encoder Layers
         transformer_config = TransformerConfig(
@@ -276,7 +288,7 @@ class BasicTrackmaniaNN(nn.Module):
         }
 
     def __call__(self, x, block_data, train: bool = True):
-        # Embeddings
+        seq_length = x.shape[1]
         block_embeds = []
         
         for feature in Features.get_block_features():
@@ -306,7 +318,7 @@ class BasicTrackmaniaNN(nn.Module):
         x = self.input_projection(x)  # Shape: (batch, timesteps, d_model)
         
         # Apply Positional Encoding
-        x = self.positional_encoding(x)  # Shape: (batch, timesteps, d_model)
+        x = self.positional_encoding(x[:, :seq_length])  # Shape: (batch, timesteps, d_model)
         
         # Apply Transformer Encoder Layers
         for layer in self.transformer_layers:
@@ -321,6 +333,19 @@ class BasicTrackmaniaNN(nn.Module):
         for feature_name in self.output_layers:
             outputs[feature_name] = self.output_layers[feature_name](x)  # Shape: (batch, timesteps, feature.size)
         return outputs
+
+def create_learning_rate_fn(config, base_learning_rate, steps_per_epoch):
+    warmup_fn = optax.linear_schedule(
+        init_value=0., end_value=base_learning_rate,
+        transition_steps=config.warmup_epochs * steps_per_epoch)
+    cosine_epochs = max(config.num_epochs - config.warmup_epochs, 1)
+    cosine_fn = optax.cosine_decay_schedule(
+        init_value=base_learning_rate,
+        decay_steps=cosine_epochs * steps_per_epoch)
+    schedule_fn = optax.join_schedules(
+        schedules=[warmup_fn, cosine_fn],
+        boundaries=[config.warmup_epochs * steps_per_epoch])
+    return schedule_fn
 
 def create_train_state(rngs, model, learning_rate, input_shape, block_shapes):
     dummy_input = jnp.ones(input_shape, dtype=jnp.float32)
@@ -375,6 +400,9 @@ def create_batches(data: Dict[str, Any], batch_size: int):
 @jax.jit
 def custom_loss(predictions, targets, loss_weights):
     total_loss = 0.0
+    event_types = targets['data'][..., Features.get_feature_index(Features.EVENT_TYPE, False)]  # Get event types
+    block_event_types = jnp.array([EventType.BLOCK_ENTER, EventType.BLOCK_EXIT])
+
     for feature in Features.get_all_features():
         if feature.name not in loss_weights or feature.encoding == EncodingType.NONE:
             continue
@@ -384,8 +412,10 @@ def custom_loss(predictions, targets, loss_weights):
 
         if feature.is_block_feature:
             true = targets['blocks'][feature.name]
+            block_event_mask = jnp.isin(event_types, block_event_types)
         else:
             true = targets['data'][..., index]
+            block_event_mask = jnp.ones_like(true, dtype=jnp.float32)
 
         if feature.encoding == EncodingType.ONE_HOT:
             loss = jnp.mean(optax.softmax_cross_entropy(pred, true))
@@ -394,7 +424,9 @@ def custom_loss(predictions, targets, loss_weights):
         else:
             loss = jnp.mean((pred - true) ** 2)
 
-        total_loss += loss_weights[feature.name] * loss
+        masked_loss = jnp.mean(loss * block_event_mask)
+
+        total_loss += loss_weights[feature.name] * masked_loss
         # print(f"Feature: {feature.name}, Loss: {jax.device_get(loss).item() * loss_weights[feature.name]}")
 
     return total_loss
@@ -538,58 +570,60 @@ def save_checkpoint(state, checkpoint_dir, prefix, epoch, max_to_keep=5):
     )
     logger.info(f"Checkpoint saved at epoch {epoch} to {checkpoint_dir}")
 
+def main():
+    config = ModelConfig()
 
-config = ModelConfig()
+    manager = TrackmaniaDataManager('trackmania_dataset.h5')
+    map_uid = 'DUzLndlMvwhFmzDkp4JSQFuuj1b'
+    data_processor = DataProcessor(manager, map_uid, config)
+    train_data, test_data, global_stats = data_processor.prepare_data()
 
-manager = TrackmaniaDataManager('trackmania_dataset.h5')
-map_uid = 'DUzLndlMvwhFmzDkp4JSQFuuj1b'
-data_processor = DataProcessor(manager, map_uid)
-train_data, test_data, global_stats = data_processor.prepare_data()
+    # Initialize Model
+    model = BasicTrackmaniaNN(config=config)
 
-# Initialize Model
-model = BasicTrackmaniaNN(config=config)
+    learning_rate_fn = create_learning_rate_fn(config, base_learning_rate=0.001, steps_per_epoch=len(train_data['inputs']['data']) // 64)
 
-# Create training state
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-input_shape = train_data['inputs']['data'].shape
-block_shapes = {key: value.shape for key, value in train_data['inputs']['blocks'].items()}
-restore_state = False
-if restore_state:
-    state = restore_train_state(
-        checkpoint_dir=CHECKPOINT_DIR,
-        model=model,
-        learning_rate=0.01,
-        input_shape=input_shape,
-        block_shapes=block_shapes,
-        rngs=rngs
-    )
-else:
-    state = create_train_state(rngs, model, learning_rate=0.01, input_shape=input_shape, block_shapes=block_shapes)
+    # Create training state
+    rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+    input_shape = train_data['inputs']['data'].shape
+    block_shapes = {key: value.shape for key, value in train_data['inputs']['blocks'].items()}
+    restore_state = False
+    if restore_state:
+        state = restore_train_state(
+            checkpoint_dir=CHECKPOINT_DIR,
+            model=model,
+            learning_rate=learning_rate_fn,
+            input_shape=input_shape,
+            block_shapes=block_shapes,
+            rngs=rngs
+        )
+    else:
+        state = create_train_state(rngs, model, learning_rate=learning_rate_fn, input_shape=input_shape, block_shapes=block_shapes)
 
+    batch_size = 64
 
-# Training loop
-num_epochs = 1000
-batch_size = 64
+    for epoch in range(state.step, config.num_epochs):
+        batch_losses = []
+        for batch in create_batches(train_data, batch_size):
+            rng_key = jax.random.fold_in(rngs['dropout'], epoch * len(train_data['inputs']['data']) // batch_size + len(batch_losses))
+            state, loss = train_step(state, batch, loss_weights, rng_key)
+            batch_losses.append(loss)
+        train_loss = jnp.mean(jnp.array(batch_losses))
+        print(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}")
+        
+        # Evaluation
+        if (epoch + 1) % 10 == 0:
+            test_accuracy = evaluate_accuracy(state, test_data)
+            out = "  Accuracies: "
+            for key, value in test_accuracy.items():
+                out += f"'{key}': {value:.4f}, "
+            print(out)
+            predict_batch = create_batches(test_data, 32).__next__()
+            pred, target = predict_single_batch(state, predict_batch)
+            collect_and_save_predictions(pred, target, epoch + 1)
+        
+        if (epoch + 1) % 50 == 0:
+            save_checkpoint(state, CHECKPOINT_DIR, CHECKPOINT_PREFIX, epoch + 1, CHECKPOINT_MAX_TO_KEEP)
 
-for epoch in range(state.step, num_epochs):
-    batch_losses = []
-    for batch in create_batches(train_data, batch_size):
-        rng_key = jax.random.fold_in(rngs['dropout'], epoch * len(train_data['inputs']['data']) // batch_size + len(batch_losses))
-        state, loss = train_step(state, batch, loss_weights, rng_key)
-        batch_losses.append(loss)
-    train_loss = jnp.mean(jnp.array(batch_losses))
-    logger.info(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}")
-    
-    # Evaluation
-    if (epoch + 1) % 10 == 0:
-        test_accuracy = evaluate_accuracy(state, test_data)
-        out = "  Accuracies: "
-        for key, value in test_accuracy.items():
-            out += f"'{key}': {value:.4f}, "
-        logger.info(out)
-        predict_batch = create_batches(test_data, 32).__next__()
-        pred, target = predict_single_batch(state, predict_batch)
-        collect_and_save_predictions(pred, target, epoch + 1)
-    
-    if (epoch + 1) % 50 == 0:
-        save_checkpoint(state, CHECKPOINT_DIR, CHECKPOINT_PREFIX, epoch + 1, CHECKPOINT_MAX_TO_KEEP)
+if __name__ == '__main__':
+    main()
