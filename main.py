@@ -5,21 +5,35 @@ from flax.training import train_state
 import optax
 from typing import List, Sequence, Tuple, Dict, Any
 import numpy as np
-import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from collections import OrderedDict
 from enums import EncodingType, EventType
-from features import FeatureInfo, Features
+from features import Features
+from flax.training import checkpoints
+
+from config import logger, loss_weights
 
 from data_manager import TrackmaniaDataManager
+from positional_encoding import PositionalEncoding
+from predict import collect_and_save_predictions, predict_single_batch
+from transformer_blocks import TransformerConfig, TransformerEncoderBlock
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+CHECKPOINT_DIR = './checkpoints'
+CHECKPOINT_PREFIX = 'train_state'
+CHECKPOINT_MAX_TO_KEEP = 5
 
 @dataclass
 class ModelConfig:
-    block_embedding_dim: int = 16
+    block_embedding_dim: int = 64
     hidden_sizes: Sequence[int] = (64, 32)
+    d_model: int = 128  # Transformer model dimension
+    num_heads: int = 8  # Number of attention heads
+    num_layers: int = 4  # Number of Transformer layers
+    mlp_dim: int = 512  # Dimension of the MLP in Transformer
+    dropout_rate: float = 0.1  # Dropout rate
+    attention_dropout_rate: float = 0.1
+    dtype: Any = jnp.bfloat16
+    deterministic: bool = False
 
 
 def get_default_block_values() -> Dict[str, Any]:
@@ -68,7 +82,7 @@ class DataProcessor:
         self.tokenizers = None
 
     def prepare_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
-        raw_data = self.manager.prepare_data_for_training(self.map_uid, sequence_length=10, stride=1, test_split=0.2)
+        raw_data = self.manager.prepare_data_for_training(self.map_uid, sequence_length=32, stride=1, test_split=0.2)
         all_block_hashes = self.extract_all_block_hashes(raw_data)
         self.tokenizers, self.tokenized_blocks = self.manager.get_tokenizers(self.map_uid, all_block_hashes)
 
@@ -212,8 +226,10 @@ class DataProcessor:
 
 class BasicTrackmaniaNN(nn.Module):
     config: ModelConfig
+    max_seq_length: int = 32  # Adjust based on your data
 
     def setup(self):
+        # Block embeddings
         block_embeddings = {}
         for feature in Features.get_block_features():
             if feature.encoding == EncodingType.TOKENIZED:
@@ -222,9 +238,43 @@ class BasicTrackmaniaNN(nn.Module):
                     features=self.config.block_embedding_dim
                 )
         self.block_embeddings = block_embeddings
+        
+        # Calculate total block embedding dimension
+        total_block_emb_dim = sum(
+            self.config.block_embedding_dim if feature.encoding == EncodingType.TOKENIZED else feature.size
+            for feature in Features.get_block_features() if feature.encoding != EncodingType.NONE
+        )
+        
+        # Initial Dense layer to project input features to d_model
+        self.input_projection = nn.Dense(self.config.d_model, use_bias=False)
+        
+        # Positional Encoding
+        self.positional_encoding = PositionalEncoding(d_model=self.config.d_model, max_len=self.max_seq_length)
+        
+        # Transformer Encoder Layers
+        transformer_config = TransformerConfig(
+            num_heads=self.config.num_heads,
+            d_model=self.config.d_model,
+            mlp_dim=self.config.mlp_dim,
+            dropout_rate=self.config.dropout_rate,
+            attention_dropout_rate=self.config.attention_dropout_rate,
+            dtype=self.config.dtype,
+            deterministic=self.config.deterministic
+        )
+        self.transformer_layers = [
+            TransformerEncoderBlock(config=transformer_config) for _ in range(self.config.num_layers)
+        ]
+        
+        # Final Dense Layers
         self.dense_layers = [nn.Dense(size) for size in self.config.hidden_sizes]
+        
+        # Define Output Dense Layers using ModuleDict
+        output_features = [feature for feature in Features.get_all_features() if feature.encoding != EncodingType.NONE]
+        self.output_layers = {
+            feature.name: nn.Dense(feature.size)
+            for feature in output_features
+        }
 
-    @nn.compact
     def __call__(self, x, block_data, train: bool = True):
         # Embeddings
         block_embeds = []
@@ -245,26 +295,34 @@ class BasicTrackmaniaNN(nn.Module):
                 block_feature = block_data[feature.name]
                 block_embeds.append(block_feature)
         
-        # Concatenate along the feature dimension (last axis)
+        # Concatenate block embeddings along the feature dimension
         if block_embeds:
             block_embeddings_concat = jnp.concatenate(block_embeds, axis=-1)  # Shape: (batch, timesteps, total_block_features)
             x = jnp.concatenate([x, block_embeddings_concat], axis=-1)  # Shape: (batch, timesteps, x_features + block_features)
         else:
             x = x  # No block embeddings to concatenate
-
+        
+        # Project input to d_model
+        x = self.input_projection(x)  # Shape: (batch, timesteps, d_model)
+        
+        # Apply Positional Encoding
+        x = self.positional_encoding(x)  # Shape: (batch, timesteps, d_model)
+        
+        # Apply Transformer Encoder Layers
+        for layer in self.transformer_layers:
+            x = layer(x, train=train)  # Shape: (batch, timesteps, d_model)
+        
         # Hidden Layers
         for layer in self.dense_layers:
-            x = nn.relu(layer(x))
-
+            x = nn.relu(layer(x))  # Shape: (batch, timesteps, hidden_size)
+        
         # Outputs
         outputs = OrderedDict()
-        for feature in Features.get_all_features():
-            if feature.encoding == EncodingType.NONE:
-                continue
-            outputs[feature.name] = nn.Dense(feature.size)(x)
+        for feature_name in self.output_layers:
+            outputs[feature_name] = self.output_layers[feature_name](x)  # Shape: (batch, timesteps, feature.size)
         return outputs
-    
-def create_train_state(rng, model, learning_rate, input_shape, block_shapes):
+
+def create_train_state(rngs, model, learning_rate, input_shape, block_shapes):
     dummy_input = jnp.ones(input_shape, dtype=jnp.float32)
     dummy_block_data = {}
     
@@ -290,22 +348,25 @@ def create_train_state(rng, model, learning_rate, input_shape, block_shapes):
     for key, value in dummy_block_data.items():
         logger.debug(f"Dummy block '{key}' shape: {value.shape}")
     
-    params = model.init(rng, dummy_input, dummy_block_data)['params']
+    params = model.init(rngs, dummy_input, dummy_block_data)['params']
     tx = optax.chain(optax.adam(learning_rate), optax.clip_by_global_norm(1.0))
     return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
 # Function to create batches
 def create_batches(data: Dict[str, Any], batch_size: int):
     num_samples = data['inputs']['data'].shape[0]
+    indices = np.arange(num_samples)
+    np.random.shuffle(indices)
     for i in range(0, num_samples, batch_size):
+        batch_indices = indices[i:i+batch_size]
         batch = {
             'inputs': {
-                'data': data['inputs']['data'][i:i+batch_size],
-                'blocks': {key: value[i:i+batch_size] for key, value in data['inputs']['blocks'].items()}
+                'data': data['inputs']['data'][batch_indices],
+                'blocks': {key: value[batch_indices] for key, value in data['inputs']['blocks'].items()}
             },
             'targets': {
-                'data': data['targets']['data'][i:i+batch_size],
-                'blocks': {key: value[i:i+batch_size] for key, value in data['targets']['blocks'].items()}
+                'data': data['targets']['data'][batch_indices],
+                'blocks': {key: value[batch_indices] for key, value in data['targets']['blocks'].items()}
             }
         }
         yield batch
@@ -334,29 +395,30 @@ def custom_loss(predictions, targets, loss_weights):
             loss = jnp.mean((pred - true) ** 2)
 
         total_loss += loss_weights[feature.name] * loss
+        # print(f"Feature: {feature.name}, Loss: {jax.device_get(loss).item() * loss_weights[feature.name]}")
 
     return total_loss
 
 @jax.jit
-def train_step(state, batch, loss_weights):
+def train_step(state, batch, loss_weights, rng_key):
     def loss_fn(params):
-        predictions = state.apply_fn({'params': params}, batch['inputs']['data'], batch['inputs']['blocks'])
+        rngs = {'dropout': rng_key}
+        predictions = state.apply_fn({'params': params}, batch['inputs']['data'], batch['inputs']['blocks'], rngs=rngs)
         return custom_loss(predictions, batch['targets'], loss_weights)
     loss, grads = jax.value_and_grad(loss_fn)(state.params)
     new_state = state.apply_gradients(grads=grads)
     return new_state, loss
 
 @jax.jit
-def eval_step(state, batch, loss_weights: Dict[str, Any]):
-    predictions = state.apply_fn({'params': state.params}, batch['inputs']['data'], batch['inputs']['blocks'])
+def eval_step(state, batch, loss_weights: Dict[str, Any], rng_key):
+    rngs = {'dropout': rng_key}
+    predictions = state.apply_fn({'params': state.params}, batch['inputs']['data'], batch['inputs']['blocks'], rngs=rngs)
     return custom_loss(predictions, batch['targets'], loss_weights)
 
 @jax.jit
 def calculate_accuracy(predictions: Dict[str, jnp.ndarray], targets: Dict[str, Any]):
     accuracies = {}
-    
-    # Retrieve feature slices for non-block features
-    feature_slices = Features.get_feature_slices()
+
     
     for feature in Features.get_all_features():
         if feature.name not in loss_weights or feature.encoding == EncodingType.NONE:
@@ -367,10 +429,6 @@ def calculate_accuracy(predictions: Dict[str, jnp.ndarray], targets: Dict[str, A
         if feature.is_block_feature:
             true = targets['blocks'][feature.name]
         else:
-            # Extract the slice corresponding to the current feature
-            feature_slice = feature_slices.get(feature.name)
-            if feature_slice is None:
-                raise ValueError(f"No slice found for feature {feature.name}")
             true = targets['data'][feature.name]
 
         # Debugging: Print feature, prediction shape, and true shape
@@ -390,12 +448,10 @@ def calculate_accuracy(predictions: Dict[str, jnp.ndarray], targets: Dict[str, A
             accuracies[feature.name] = acc
         
         elif feature.encoding == EncodingType.NUMERICAL:
-            # For NUMERICAL features, use a threshold-based accuracy
-            position_threshold = 1.0  # Adjust as needed
-            # Assuming numerical features have multiple dimensions (e.g., x, y, z)
-            correct = jnp.all(jnp.abs(pred - true) < position_threshold, axis=-1)
-            acc = jnp.mean(correct)
-            accuracies[feature.name] = acc
+            # For NUMERICAL features, calculate average distance
+            distances = jnp.abs(pred - true)
+            avg_distance = jnp.mean(distances)
+            accuracies[feature.name] = avg_distance
         
         else:
             # Handle other encodings if necessary
@@ -410,7 +466,8 @@ def evaluate_accuracy(state, data, batch_size=32):
     
     for batch in create_batches(data, batch_size):
         # Forward pass to get predictions
-        predictions = state.apply_fn({'params': state.params}, batch['inputs']['data'], batch['inputs']['blocks'])
+        rngs = {'dropout': jax.random.PRNGKey(0)}
+        predictions = state.apply_fn({'params': state.params}, batch['inputs']['data'], batch['inputs']['blocks'], rngs=rngs)
         all_predictions.append(predictions)
         all_targets.append(batch['targets'])
     
@@ -459,6 +516,29 @@ def evaluate_accuracy(state, data, batch_size=32):
     
     return accuracies
 
+
+def restore_train_state(checkpoint_dir, model, learning_rate, input_shape, block_shapes, rngs):
+    restored_state = checkpoints.restore_checkpoint(ckpt_dir=checkpoint_dir, target=None)
+    if restored_state:
+        logger.info(f"Restored train state from {checkpoint_dir}")
+        return restored_state
+    else:
+        logger.info("No checkpoint found. Initializing a new train state.")
+        return create_train_state(rngs, model, learning_rate, input_shape, block_shapes)
+
+
+def save_checkpoint(state, checkpoint_dir, prefix, epoch, max_to_keep=5):
+    # Save the current state with epoch number
+    checkpoints.save_checkpoint(
+        ckpt_dir=checkpoint_dir,
+        target=state,
+        step=epoch,
+        prefix=prefix,
+        keep=max_to_keep
+    )
+    logger.info(f"Checkpoint saved at epoch {epoch} to {checkpoint_dir}")
+
+
 config = ModelConfig()
 
 manager = TrackmaniaDataManager('trackmania_dataset.h5')
@@ -470,49 +550,46 @@ train_data, test_data, global_stats = data_processor.prepare_data()
 model = BasicTrackmaniaNN(config=config)
 
 # Create training state
-rng = jax.random.PRNGKey(0)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
 input_shape = train_data['inputs']['data'].shape
 block_shapes = {key: value.shape for key, value in train_data['inputs']['blocks'].items()}
-state = create_train_state(rng, model, learning_rate=0.01, input_shape=input_shape, block_shapes=block_shapes)
+restore_state = False
+if restore_state:
+    state = restore_train_state(
+        checkpoint_dir=CHECKPOINT_DIR,
+        model=model,
+        learning_rate=0.01,
+        input_shape=input_shape,
+        block_shapes=block_shapes,
+        rngs=rngs
+    )
+else:
+    state = create_train_state(rngs, model, learning_rate=0.01, input_shape=input_shape, block_shapes=block_shapes)
 
-# Define loss weights
-loss_weights = {
-    Features.POSITION.name: 0.01,
-    Features.VELOCITY.name: 0.01,
-    Features.EVENT_TYPE.name: 10,
-    Features.TIME.name: 0.0001,
-    Features.BLOCK_NAME.name: 5.0,
-    Features.BLOCK_PAGE_NAME.name: 5.0,
-    Features.BLOCK_POSITION.name: 0.01,
-    Features.BLOCK_DIRECTION.name: 1,
-    Features.INPUT_STEER.name: 0.01,
-    Features.INPUT_GAS_PEDAL.name: 0.1,
-    Features.INPUT_BRAKE_PEDAL.name: 0.1
-}
 
 # Training loop
 num_epochs = 1000
 batch_size = 64
 
-for epoch in range(num_epochs):
+for epoch in range(state.step, num_epochs):
     batch_losses = []
     for batch in create_batches(train_data, batch_size):
-        state, loss = train_step(state, batch, loss_weights)
+        rng_key = jax.random.fold_in(rngs['dropout'], epoch * len(train_data['inputs']['data']) // batch_size + len(batch_losses))
+        state, loss = train_step(state, batch, loss_weights, rng_key)
         batch_losses.append(loss)
     train_loss = jnp.mean(jnp.array(batch_losses))
     logger.info(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}")
-
-    # Evaluation (optional)
-    # eval_losses = []
-    # for batch in create_batches(test_data, batch_size):
-    #     loss = eval_step(state, batch, loss_weights, config.output_features)
-    #     eval_losses.append(loss)
-    # test_loss = jnp.mean(jnp.array(eval_losses))
     
-    test_accuracy = evaluate_accuracy(state, test_data)
-
-    # logger.info(f"Epoch {epoch + 1}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}")
-    out = f"  Accuracies: "
-    for key, value in test_accuracy.items():
-        out += f"'{key}': {value:.4f}, "
-    logger.info(out)
+    # Evaluation
+    if (epoch + 1) % 10 == 0:
+        test_accuracy = evaluate_accuracy(state, test_data)
+        out = "  Accuracies: "
+        for key, value in test_accuracy.items():
+            out += f"'{key}': {value:.4f}, "
+        logger.info(out)
+        predict_batch = create_batches(test_data, 32).__next__()
+        pred, target = predict_single_batch(state, predict_batch)
+        collect_and_save_predictions(pred, target, epoch + 1)
+    
+    if (epoch + 1) % 50 == 0:
+        save_checkpoint(state, CHECKPOINT_DIR, CHECKPOINT_PREFIX, epoch + 1, CHECKPOINT_MAX_TO_KEEP)
