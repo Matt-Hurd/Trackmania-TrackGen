@@ -1,4 +1,6 @@
+import glob
 import logging
+import pathlib
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -8,9 +10,9 @@ from typing import List, Sequence, Tuple, Dict, Any
 import numpy as np
 from dataclasses import dataclass
 from collections import OrderedDict
+from checkpoint import restore_train_state, save_checkpoint
 from enums import EncodingType, EventType
 from features import Features
-from flax.training import checkpoints
 
 from config import loss_weights
 
@@ -18,13 +20,6 @@ from data_manager import TrackmaniaDataManager
 from positional_encoding import PositionalEncoding
 from predict import collect_and_save_predictions, predict_single_batch
 from transformer_blocks import TransformerConfig, TransformerEncoderBlock
-
-import os
-
-CHECKPOINT_DIR = './checkpoints'
-CHECKPOINT_DIR = os.path.abspath(CHECKPOINT_DIR)
-CHECKPOINT_PREFIX = 'train_state'
-CHECKPOINT_MAX_TO_KEEP = 5
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -82,24 +77,30 @@ def get_block_data_for_hashes(block_hashes: np.ndarray, tokenized_blocks: Dict[s
     return field_values
 
 class DataProcessor:
-    def __init__(self, manager: TrackmaniaDataManager, map_uid: str, config: ModelConfig):
+    def __init__(self, manager: TrackmaniaDataManager, map_uid: str, config: ModelConfig, global_stats: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] = None):
         self.manager = manager
         self.map_uid = map_uid
         self.config = config
         self.tokenized_blocks = None
-        self.global_stats = None
+        self.global_stats = global_stats
         self.tokenizers = None
+    
+    def load_all_tokenizers(self):
+        self.tokenizers, self.tokenized_blocks = self.manager.get_tokenizers(self.map_uid)
 
-    def prepare_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
-        raw_data = self.manager.prepare_data_for_training(self.map_uid, sequence_length=32, stride=1, test_split=0.2)
+    def prepare_data(self, mode='train') -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+        raw_data, global_stats = self.manager.prepare_data_for_training(self.map_uid, sequence_length=32, stride=1, test_split=0.2)
         all_block_hashes = self.extract_all_block_hashes(raw_data)
         self.tokenizers, self.tokenized_blocks = self.manager.get_tokenizers(self.map_uid, all_block_hashes)
 
         # Update config sizes based on data
         self.update_config_sizes()
 
-        self.global_stats = self.get_or_compute_global_stats(raw_data['train_inputs'])
+        if self.global_stats is None:
+            # Load global_stats from DataManager
+            self.global_stats = self.manager.load_global_stats(self.map_uid)
 
+        # Normalize and preprocess
         train = {
             "inputs": self.preprocess_data(raw_data['train_inputs']),
             "targets": self.preprocess_data(raw_data['train_targets']),
@@ -108,7 +109,7 @@ class DataProcessor:
             "inputs": self.preprocess_data(raw_data['test_inputs']),
             "targets": self.preprocess_data(raw_data['test_targets']),
         }
-        return train, test, self.global_stats
+        return train, test
 
     def update_config_sizes(self):
         for block_feature in Features.get_block_features():
@@ -222,11 +223,12 @@ class DataProcessor:
         }
 
     def normalize_data(self, data: np.ndarray) -> None:
-        global_position_mean, global_position_std, global_velocity_mean, global_velocity_std = self.global_stats
+        global_position_mean, _, global_velocity_mean, _ = self.global_stats
         
         # Normalize time
-        time = data[Features.TIME.name]
-        data[Features.TIME.name] = time - np.min(time, axis=1, keepdims=True)
+        # Disabled for now
+        # time = data[Features.TIME.name]
+        # data[Features.TIME.name] = time - np.min(time, axis=1, keepdims=True)
 
         # Normalize position
         position = data[Features.POSITION.name]
@@ -290,7 +292,7 @@ class BasicTrackmaniaNN(nn.Module):
     def __call__(self, x, block_data, train: bool = True):
         seq_length = x.shape[1]
         block_embeds = []
-        
+
         for feature in Features.get_block_features():
             if feature.encoding == EncodingType.NONE:
                 continue
@@ -548,35 +550,13 @@ def evaluate_accuracy(state, data, batch_size=32):
     
     return accuracies
 
-
-def restore_train_state(checkpoint_dir, model, learning_rate, input_shape, block_shapes, rngs):
-    restored_state = checkpoints.restore_checkpoint(ckpt_dir=checkpoint_dir, target=None)
-    if restored_state:
-        logger.info(f"Restored train state from {checkpoint_dir}")
-        return restored_state
-    else:
-        logger.info("No checkpoint found. Initializing a new train state.")
-        return create_train_state(rngs, model, learning_rate, input_shape, block_shapes)
-
-
-def save_checkpoint(state, checkpoint_dir, prefix, epoch, max_to_keep=5):
-    # Save the current state with epoch number
-    checkpoints.save_checkpoint(
-        ckpt_dir=checkpoint_dir,
-        target=state,
-        step=epoch,
-        prefix=prefix,
-        keep=max_to_keep
-    )
-    logger.info(f"Checkpoint saved at epoch {epoch} to {checkpoint_dir}")
-
 def main():
     config = ModelConfig()
 
     manager = TrackmaniaDataManager('trackmania_dataset.h5')
     map_uid = 'DUzLndlMvwhFmzDkp4JSQFuuj1b'
     data_processor = DataProcessor(manager, map_uid, config)
-    train_data, test_data, global_stats = data_processor.prepare_data()
+    train_data, test_data = data_processor.prepare_data()
 
     # Initialize Model
     model = BasicTrackmaniaNN(config=config)
@@ -587,22 +567,15 @@ def main():
     rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
     input_shape = train_data['inputs']['data'].shape
     block_shapes = {key: value.shape for key, value in train_data['inputs']['blocks'].items()}
-    restore_state = False
+    restore_state = True
+    epoch = 0
+    state = create_train_state(rngs, model, learning_rate=learning_rate_fn, input_shape=input_shape, block_shapes=block_shapes)
     if restore_state:
-        state = restore_train_state(
-            checkpoint_dir=CHECKPOINT_DIR,
-            model=model,
-            learning_rate=learning_rate_fn,
-            input_shape=input_shape,
-            block_shapes=block_shapes,
-            rngs=rngs
-        )
-    else:
-        state = create_train_state(rngs, model, learning_rate=learning_rate_fn, input_shape=input_shape, block_shapes=block_shapes)
+        epoch, state = restore_train_state(state)
 
     batch_size = 64
 
-    for epoch in range(state.step, config.num_epochs):
+    for epoch in range(epoch, config.num_epochs):
         batch_losses = []
         for batch in create_batches(train_data, batch_size):
             rng_key = jax.random.fold_in(rngs['dropout'], epoch * len(train_data['inputs']['data']) // batch_size + len(batch_losses))
@@ -622,8 +595,8 @@ def main():
             pred, target = predict_single_batch(state, predict_batch)
             collect_and_save_predictions(pred, target, epoch + 1)
         
-        if (epoch + 1) % 50 == 0:
-            save_checkpoint(state, CHECKPOINT_DIR, CHECKPOINT_PREFIX, epoch + 1, CHECKPOINT_MAX_TO_KEEP)
+        if (epoch + 1) % 10 == 0:
+            save_checkpoint(state, epoch + 1)
 
 if __name__ == '__main__':
     main()

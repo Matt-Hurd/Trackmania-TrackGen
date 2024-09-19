@@ -3,3 +3,4 @@ Dumps
 *.h5
 predictions
 checkpoints
+predictions.json
