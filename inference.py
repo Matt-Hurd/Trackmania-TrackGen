@@ -9,6 +9,7 @@ from data_manager import TrackmaniaDataManager
 from enums import EncodingType, EventType
 from features import Features
 from main import BasicTrackmaniaNN, DataProcessor, ModelConfig, create_learning_rate_fn, create_train_state, restore_train_state
+
 def autoregressive_predict(
     model,
     initial_input: jnp.ndarray,
@@ -37,16 +38,21 @@ def autoregressive_predict(
     """
     
     generated_blocks = {
-        feature.name: jnp.zeros(
-            (block_data[feature.name].shape[0], 0, block_data[feature.name].shape[2]) if len(block_data[feature.name].shape) == 3 else (block_data[feature.name].shape[0], 0),
-            dtype=jnp.int32 if feature.encoding == EncodingType.TOKENIZED else jnp.float32
-        )
-        for feature in Features.get_block_features() if feature.encoding != EncodingType.NONE
+        feature.name: jnp.copy(block_data[feature.name]) for feature in Features.get_block_features() if feature.encoding != EncodingType.NONE
+        # feature.name: jnp.zeros(
+        #     (block_data[feature.name].shape[0], 0, block_data[feature.name].shape[2]) if len(block_data[feature.name].shape) == 3 else (block_data[feature.name].shape[0], 0),
+        #     dtype=jnp.int32 if feature.encoding == EncodingType.TOKENIZED else jnp.float32
+        # )
+        # for feature in Features.get_block_features() if feature.encoding != EncodingType.NONE
     }
 
     predicted_sequence = initial_input  # Shape: (batch_size, window_size, num_features)
     generated_events = []
     current_input = initial_input
+
+    # DEBUG, ADD ALL INPUTS TO GENERATED EVENTS
+    for i in range(initial_input.shape[1]):
+        generated_events.append(initial_input[:, i:i+1, :])
 
     for step in range(output_length):
         # Apply the model to the current window

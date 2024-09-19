@@ -406,7 +406,7 @@ def custom_loss(predictions, targets, loss_weights):
     block_event_types = jnp.array([EventType.BLOCK_ENTER, EventType.BLOCK_EXIT])
 
     for feature in Features.get_all_features():
-        if feature.name not in loss_weights or feature.encoding == EncodingType.NONE:
+        if feature.encoding == EncodingType.NONE:
             continue
 
         index = Features.get_feature_index(feature, False)
@@ -428,7 +428,7 @@ def custom_loss(predictions, targets, loss_weights):
 
         masked_loss = jnp.mean(loss * block_event_mask)
 
-        total_loss += loss_weights[feature.name] * masked_loss
+        total_loss += loss_weights.get(feature.name, 0.1) * masked_loss
         # print(f"Feature: {feature.name}, Loss: {jax.device_get(loss).item() * loss_weights[feature.name]}")
 
     return total_loss
@@ -561,7 +561,7 @@ def main():
     # Initialize Model
     model = BasicTrackmaniaNN(config=config)
 
-    learning_rate_fn = create_learning_rate_fn(config, base_learning_rate=0.001, steps_per_epoch=len(train_data['inputs']['data']) // 64)
+    learning_rate_fn = create_learning_rate_fn(config, base_learning_rate=0.0001, steps_per_epoch=len(train_data['inputs']['data']) // 64)
 
     # Create training state
     rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
