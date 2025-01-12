@@ -17,5 +17,8 @@ def restore_train_state(train_state):
     return 0, train_state
 
 def save_checkpoint(state, epoch):
-    with ocp.CheckpointManager(pathlib.Path(CHECKPOINT_DIR), options=options) as mngr:
-        mngr.save(epoch, args=ocp.args.StandardSave(state))
+    try:
+        with ocp.CheckpointManager(pathlib.Path(CHECKPOINT_DIR), options=options) as mngr:
+            mngr.save(epoch, args=ocp.args.StandardSave(state))
+    except Exception as e:
+        print(f"Error saving checkpoint: {e}")

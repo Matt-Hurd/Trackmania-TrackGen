@@ -37,7 +37,7 @@ class ModelConfig:
     dtype: Any = jnp.bfloat16
     deterministic: bool = False
     warmup_epochs = 5
-    num_epochs = 1000
+    num_epochs = 50000
 
 
 def get_default_block_values() -> Dict[str, Any]:
