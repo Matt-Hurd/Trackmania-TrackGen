@@ -4,3 +4,4 @@ Dumps
 predictions
 checkpoints
 predictions.json
+.venv

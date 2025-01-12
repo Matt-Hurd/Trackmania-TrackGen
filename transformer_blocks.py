@@ -14,40 +14,28 @@ class TransformerConfig:
     attention_dropout_rate: float
     dtype: Any
     deterministic: bool
-
 class TransformerEncoderBlock(nn.Module):
     config: TransformerConfig
 
-    def setup(self):
-        self.layer_norm1 = nn.LayerNorm(dtype=self.config.dtype)
-        self.self_attention = nn.MultiHeadDotProductAttention(
+    @nn.compact
+    def __call__(self, inputs, train=True):
+        x = nn.LayerNorm(dtype=self.config.dtype)(inputs)
+        x = nn.SelfAttention(
             num_heads=self.config.num_heads,
-            dtype=self.config.dtype,
             qkv_features=self.config.d_model,
+            out_features=self.config.d_model,
             dropout_rate=self.config.attention_dropout_rate,
             deterministic=self.config.deterministic,
-        )
-        self.dropout1 = nn.Dropout(rate=self.config.dropout_rate)
+            dtype=self.config.dtype,
+        )(x, training=train)
+        x = nn.Dropout(rate=self.config.dropout_rate)(x, deterministic=self.config.deterministic)
+        x = x + inputs
 
-        self.layer_norm2 = nn.LayerNorm(dtype=self.config.dtype)
-        self.ffn = nn.Sequential([
-            nn.Dense(self.config.mlp_dim),
-            nn.relu,
-            nn.Dense(self.config.d_model)
-        ])
-        self.dropout2 = nn.Dropout(rate=self.config.dropout_rate)
+        y = nn.LayerNorm(dtype=self.config.dtype)(x)
+        y = nn.Dense(features=self.config.mlp_dim, dtype=self.config.dtype)(y)
+        y = nn.relu(y)
+        y = nn.Dropout(rate=self.config.dropout_rate)(y, deterministic=self.config.deterministic)
+        y = nn.Dense(features=self.config.d_model, dtype=self.config.dtype)(y)
+        y = nn.Dropout(rate=self.config.dropout_rate)(y, deterministic=self.config.deterministic)
 
-    def __call__(self, x, train: bool = True):
-        # Self-Attention Block
-        norm_x = self.layer_norm1(x)
-        attn_output = self.self_attention(norm_x, norm_x, norm_x)
-        attn_output = self.dropout1(attn_output, deterministic=not train)
-        x = x + attn_output
-
-        # Feed-Forward Network (FFN) Block
-        norm_x = self.layer_norm2(x)
-        ffn_output = self.ffn(norm_x)
-        ffn_output = self.dropout2(ffn_output, deterministic=not train)
-        x = x + ffn_output
-
-        return x
+        return x + y

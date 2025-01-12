@@ -4,37 +4,27 @@ from typing import Dict, List
 import jax
 import numpy as np
 import jax.numpy as jnp
+import flax.linen as nn
 from features import Features, EncodingType
 from typing import Any
+from flax.training import train_state
 
 from config import loss_weights
 
 PREDICT_DIR = './predictions'
 os.makedirs(PREDICT_DIR, exist_ok=True)
 
-def predict_single_batch(state, batch):    
+
+def predict_single_batch(state: train_state.TrainState, model: nn.Module, batch):
     rngs = {'dropout': jax.random.PRNGKey(0)}
-    predictions = state.apply_fn({'params': state.params}, batch['inputs']['data'], batch['inputs']['blocks'], rngs=rngs)
-    targets = batch['targets']
-
-    targets_dict = {
-        'data': {},
-        'blocks': {}
-    }
-    
-    for feature in Features.get_all_features():
-        if feature.encoding == EncodingType.NONE:
-            continue
-        if feature.is_block_feature:
-            targets_dict['blocks'][feature.name] = targets['blocks'][feature.name]
-        else:
-            feature_slice = Features.get_feature_index(feature, False)
-            if feature_slice is None:
-                raise ValueError(f"No slice found for feature {feature.name}")
-            true_feature = targets['data'][..., feature_slice]
-            targets_dict['data'][feature.name] = true_feature
-
-    return predictions, targets_dict
+    predictions = model.apply(
+        {'params': state.params},
+        batch['inputs']['data'],
+        batch['inputs']['blocks'],
+        rngs=rngs,
+        train=False,
+    )
+    return predictions, batch['targets']
 
 def collect_and_save_predictions(predictions: Dict[str, jnp.ndarray],
                                  targets: Dict[str, Any],

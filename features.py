@@ -1,170 +1,127 @@
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
+import flax.struct
+import jax.numpy as jnp
+from typing import Tuple
 from enums import Material, ReactorBoostType, ReactorBoostLevel, EventType, BlockDirection, EncodingType
 
-@dataclass
-class FeatureInfo:
+@flax.struct.dataclass
+class Feature:
     name: str
     size: int
     encoding: EncodingType
-    vocabulary_size: Optional[int] = None
     is_block_feature: bool = False
-    _output_index: slice = None
-    _input_index: slice = None
+    index: int = flax.struct.field(default=-1, pytree_node=False)
 
-    def __hash__(self):
-        return hash((self.name, self.encoding, self.is_block_feature))
+class Features:
+    # Non-block features
+    TIME = Feature("Time", 1, EncodingType.NUMERICAL, index=0)
+    POSITION = Feature("Position", 3, EncodingType.NUMERICAL, index=1)
+    LEFT = Feature("Left", 3, EncodingType.NUMERICAL, index=2)
+    UP = Feature("Up", 3, EncodingType.NUMERICAL, index=3)
+    DIR = Feature("Dir", 3, EncodingType.NUMERICAL, index=4)
+    VELOCITY = Feature("Velocity", 3, EncodingType.NUMERICAL, index=5)
+    WORLD_CAR_UP = Feature("WorldCarUp", 3, EncodingType.NUMERICAL, index=6)
+    FRONT_SPEED = Feature("FrontSpeed", 1, EncodingType.NUMERICAL, index=7)
+    INPUT_STEER = Feature("InputSteer", 1, EncodingType.NUMERICAL, index=8)
+    FL_STEER_ANGLE = Feature("FLSteerAngle", 1, EncodingType.NUMERICAL, index=9)
+    FL_WHEEL_ROT = Feature("FLWheelRot", 1, EncodingType.NUMERICAL, index=10)
+    FL_WHEEL_ROT_SPEED = Feature("FLWheelRotSpeed", 1, EncodingType.NUMERICAL, index=11)
+    FL_DAMPER_LEN = Feature("FLDamperLen", 1, EncodingType.NUMERICAL, index=12)
+    FL_SLIP_COEF = Feature("FLSlipCoef", 1, EncodingType.NUMERICAL, index=13)
+    FR_STEER_ANGLE = Feature("FRSteerAngle", 1, EncodingType.NUMERICAL, index=14)
+    FR_WHEEL_ROT = Feature("FRWheelRot", 1, EncodingType.NUMERICAL, index=15)
+    FR_WHEEL_ROT_SPEED = Feature("FRWheelRotSpeed", 1, EncodingType.NUMERICAL, index=16)
+    FR_DAMPER_LEN = Feature("FRDamperLen", 1, EncodingType.NUMERICAL, index=17)
+    FR_SLIP_COEF = Feature("FRSlipCoef", 1, EncodingType.NUMERICAL, index=18)
+    RL_STEER_ANGLE = Feature("RLSteerAngle", 1, EncodingType.NUMERICAL, index=19)
+    RL_WHEEL_ROT = Feature("RLWheelRot", 1, EncodingType.NUMERICAL, index=20)
+    RL_WHEEL_ROT_SPEED = Feature("RLWheelRotSpeed", 1, EncodingType.NUMERICAL, index=21)
+    RL_DAMPER_LEN = Feature("RLDamperLen", 1, EncodingType.NUMERICAL, index=22)
+    RL_SLIP_COEF = Feature("RLSlipCoef", 1, EncodingType.NUMERICAL, index=23)
+    RR_STEER_ANGLE = Feature("RRSteerAngle", 1, EncodingType.NUMERICAL, index=24)
+    RR_WHEEL_ROT = Feature("RRWheelRot", 1, EncodingType.NUMERICAL, index=25)
+    RR_WHEEL_ROT_SPEED = Feature("RRWheelRotSpeed", 1, EncodingType.NUMERICAL, index=26)
+    RR_DAMPER_LEN = Feature("RRDamperLen", 1, EncodingType.NUMERICAL, index=27)
+    RR_SLIP_COEF = Feature("RRSlipCoef", 1, EncodingType.NUMERICAL, index=28)
+    FL_ICING = Feature("FLIcing01", 1, EncodingType.NUMERICAL, index=29)
+    FR_ICING = Feature("FRIcing01", 1, EncodingType.NUMERICAL, index=30)
+    RL_ICING = Feature("RLIcing01", 1, EncodingType.NUMERICAL, index=31)
+    RR_ICING = Feature("RRIcing01", 1, EncodingType.NUMERICAL, index=32)
+    FL_TIRE_WEAR = Feature("FLTireWear01", 1, EncodingType.NUMERICAL, index=33)
+    FR_TIRE_WEAR = Feature("FRTireWear01", 1, EncodingType.NUMERICAL, index=34)
+    RL_TIRE_WEAR = Feature("RLTireWear01", 1, EncodingType.NUMERICAL, index=35)
+    RR_TIRE_WEAR = Feature("RRTireWear01", 1, EncodingType.NUMERICAL, index=36)
+    FL_BREAK_NORMED_COEF = Feature("FLBreakNormedCoef", 1, EncodingType.NUMERICAL, index=37)
+    FR_BREAK_NORMED_COEF = Feature("FRBreakNormedCoef", 1, EncodingType.NUMERICAL, index=38)
+    RL_BREAK_NORMED_COEF = Feature("RLBreakNormedCoef", 1, EncodingType.NUMERICAL, index=39)
+    RR_BREAK_NORMED_COEF = Feature("RRBreakNormedCoef", 1, EncodingType.NUMERICAL, index=40)
+    REACTOR_AIR_CONTROL = Feature("ReactorAirControl", 3, EncodingType.NUMERICAL, index=41)
+    GROUND_DIST = Feature("GroundDist", 1, EncodingType.NUMERICAL, index=42)
+    TURBO_TIME = Feature("TurboTime", 1, EncodingType.NUMERICAL, index=43)
 
-class OrderedFeaturesMeta(type):
-    def __new__(cls, name, bases, attrs):
-        features = []
-        for key, value in attrs.items():
-            if isinstance(value, FeatureInfo):
-                features.append((key, value))
-        attrs['_features'] = [f[1] for f in features]
-        return super().__new__(cls, name, bases, attrs)
+    REACTOR_INPUTS_X = Feature("ReactorInputsX", 2, EncodingType.ONE_HOT, index=44)
+    IS_GROUND_CONTACT = Feature("IsGroundContact", 2, EncodingType.ONE_HOT, index=45)
+    IS_WHEELS_BURNING = Feature("IsWheelsBurning", 2, EncodingType.ONE_HOT, index=46)
+    IS_REACTOR_GROUND_MODE = Feature("IsReactorGroundMode", 2, EncodingType.ONE_HOT, index=47)
+    INPUT_GAS_PEDAL = Feature("InputGasPedal", 2, EncodingType.ONE_HOT, index=48)
+    INPUT_BRAKE_PEDAL = Feature("InputBrakePedal", 2, EncodingType.ONE_HOT, index=49)
+    ENGINE_ON = Feature("EngineOn", 2, EncodingType.ONE_HOT, index=50)
+    IS_TURBO = Feature("IsTurbo", 2, EncodingType.ONE_HOT, index=51)
 
-    def __iter__(self):
-        return iter(self._features)
+    REACTOR_BOOST_TYPE = Feature("ReactorBoostType", len(ReactorBoostType), EncodingType.ONE_HOT, index=52)
+    REACTOR_BOOST_LVL = Feature("ReactorBoostLvl", len(ReactorBoostLevel), EncodingType.ONE_HOT, index=53)
+    FL_GROUND_CONTACT_MATERIAL = Feature("FLGroundContactMaterial", len(Material), EncodingType.ONE_HOT, index=54)
+    FR_GROUND_CONTACT_MATERIAL = Feature("FRGroundContactMaterial", len(Material), EncodingType.ONE_HOT, index=55)
+    RL_GROUND_CONTACT_MATERIAL = Feature("RLGroundContactMaterial", len(Material), EncodingType.ONE_HOT, index=56)
+    RR_GROUND_CONTACT_MATERIAL = Feature("RRGroundContactMaterial", len(Material), EncodingType.ONE_HOT, index=57)
+    CUR_GEAR = Feature("CurGear", 6, EncodingType.ONE_HOT, index=58)
 
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self._features[key]
-        for feature in self._features:
-            if feature.name == key:
-                return feature
-        raise KeyError(key)
+    EVENT_TYPE = Feature("EventType", len(EventType), EncodingType.ONE_HOT, index=59)
+    BLOCK_HASH = Feature("BlockHash", 0, EncodingType.NONE, is_block_feature=True)  # size will be set dynamically
 
-class Features(metaclass=OrderedFeaturesMeta):
-    TIME                        = FeatureInfo("Time", 1, EncodingType.NUMERICAL)
-    POSITION                    = FeatureInfo("Position", 3, EncodingType.NUMERICAL)
-    LEFT                        = FeatureInfo("Left", 3, EncodingType.NUMERICAL)
-    UP                          = FeatureInfo("Up", 3, EncodingType.NUMERICAL)
-    DIR                         = FeatureInfo("Dir", 3, EncodingType.NUMERICAL)
-    VELOCITY                    = FeatureInfo("Velocity", 3, EncodingType.NUMERICAL)
-    WORLD_CAR_UP                = FeatureInfo("WorldCarUp", 3, EncodingType.NUMERICAL)
-    FRONT_SPEED                 = FeatureInfo("FrontSpeed", 1, EncodingType.NUMERICAL)
-    INPUT_STEER                 = FeatureInfo("InputSteer", 1, EncodingType.NUMERICAL)
-    FL_STEER_ANGLE              = FeatureInfo("FLSteerAngle", 1, EncodingType.NUMERICAL)
-    FL_WHEEL_ROT                = FeatureInfo("FLWheelRot", 1, EncodingType.NUMERICAL)
-    FL_WHEEL_ROT_SPEED          = FeatureInfo("FLWheelRotSpeed", 1, EncodingType.NUMERICAL)
-    FL_DAMPER_LEN               = FeatureInfo("FLDamperLen", 1, EncodingType.NUMERICAL)
-    FL_SLIP_COEF                = FeatureInfo("FLSlipCoef", 1, EncodingType.NUMERICAL)
-    FR_STEER_ANGLE              = FeatureInfo("FRSteerAngle", 1, EncodingType.NUMERICAL)
-    FR_WHEEL_ROT                = FeatureInfo("FRWheelRot", 1, EncodingType.NUMERICAL)
-    FR_WHEEL_ROT_SPEED          = FeatureInfo("FRWheelRotSpeed", 1, EncodingType.NUMERICAL)
-    FR_DAMPER_LEN               = FeatureInfo("FRDamperLen", 1, EncodingType.NUMERICAL)
-    FR_SLIP_COEF                = FeatureInfo("FRSlipCoef", 1, EncodingType.NUMERICAL)
-    RL_STEER_ANGLE              = FeatureInfo("RLSteerAngle", 1, EncodingType.NUMERICAL)
-    RL_WHEEL_ROT                = FeatureInfo("RLWheelRot", 1, EncodingType.NUMERICAL)
-    RL_WHEEL_ROT_SPEED          = FeatureInfo("RLWheelRotSpeed", 1, EncodingType.NUMERICAL)
-    RL_DAMPER_LEN               = FeatureInfo("RLDamperLen", 1, EncodingType.NUMERICAL)
-    RL_SLIP_COEF                = FeatureInfo("RLSlipCoef", 1, EncodingType.NUMERICAL)
-    RR_STEER_ANGLE              = FeatureInfo("RRSteerAngle", 1, EncodingType.NUMERICAL)
-    RR_WHEEL_ROT                = FeatureInfo("RRWheelRot", 1, EncodingType.NUMERICAL)
-    RR_WHEEL_ROT_SPEED          = FeatureInfo("RRWheelRotSpeed", 1, EncodingType.NUMERICAL)
-    RR_DAMPER_LEN               = FeatureInfo("RRDamperLen", 1, EncodingType.NUMERICAL)
-    RR_SLIP_COEF                = FeatureInfo("RRSlipCoef", 1, EncodingType.NUMERICAL)
-    FL_ICING                    = FeatureInfo("FLIcing01", 1, EncodingType.NUMERICAL)
-    FR_ICING                    = FeatureInfo("FRIcing01", 1, EncodingType.NUMERICAL)
-    RL_ICING                    = FeatureInfo("RLIcing01", 1, EncodingType.NUMERICAL)
-    RR_ICING                    = FeatureInfo("RRIcing01", 1, EncodingType.NUMERICAL)
-    FL_TIRE_WEAR                = FeatureInfo("FLTireWear01", 1, EncodingType.NUMERICAL)
-    FR_TIRE_WEAR                = FeatureInfo("FRTireWear01", 1, EncodingType.NUMERICAL)
-    RL_TIRE_WEAR                = FeatureInfo("RLTireWear01", 1, EncodingType.NUMERICAL)
-    RR_TIRE_WEAR                = FeatureInfo("RRTireWear01", 1, EncodingType.NUMERICAL)
-    FL_BREAK_NORMED_COEF        = FeatureInfo("FLBreakNormedCoef", 1, EncodingType.NUMERICAL)
-    FR_BREAK_NORMED_COEF        = FeatureInfo("FRBreakNormedCoef", 1, EncodingType.NUMERICAL)
-    RL_BREAK_NORMED_COEF        = FeatureInfo("RLBreakNormedCoef", 1, EncodingType.NUMERICAL)
-    RR_BREAK_NORMED_COEF        = FeatureInfo("RRBreakNormedCoef", 1, EncodingType.NUMERICAL)
-    REACTOR_AIR_CONTROL         = FeatureInfo("ReactorAirControl", 3, EncodingType.NUMERICAL)
-    GROUND_DIST                 = FeatureInfo("GroundDist", 1, EncodingType.NUMERICAL)
-    TURBO_TIME                  = FeatureInfo("TurboTime", 1, EncodingType.NUMERICAL)
-
-    REACTOR_INPUTS_X            = FeatureInfo("ReactorInputsX", 2, EncodingType.ONE_HOT)
-    IS_GROUND_CONTACT           = FeatureInfo("IsGroundContact", 2, EncodingType.ONE_HOT)
-    IS_WHEELS_BURNING           = FeatureInfo("IsWheelsBurning", 2, EncodingType.ONE_HOT)
-    IS_REACTOR_GROUND_MODE      = FeatureInfo("IsReactorGroundMode", 2, EncodingType.ONE_HOT)
-    INPUT_GAS_PEDAL             = FeatureInfo("InputGasPedal", 2, EncodingType.ONE_HOT)
-    INPUT_BRAKE_PEDAL           = FeatureInfo("InputBrakePedal", 2, EncodingType.ONE_HOT)
-    ENGINE_ON                   = FeatureInfo("EngineOn", 2, EncodingType.ONE_HOT)
-    IS_TURBO                    = FeatureInfo("IsTurbo", 2, EncodingType.ONE_HOT)
-
-    REACTOR_BOOST_TYPE          = FeatureInfo("ReactorBoostType", len(ReactorBoostType), EncodingType.ONE_HOT)
-    REACTOR_BOOST_LVL           = FeatureInfo("ReactorBoostLvl", len(ReactorBoostLevel), EncodingType.ONE_HOT)
-    FL_GROUND_CONTACT_MATERIAL  = FeatureInfo("FLGroundContactMaterial", len(Material), EncodingType.ONE_HOT)
-    FR_GROUND_CONTACT_MATERIAL  = FeatureInfo("FRGroundContactMaterial", len(Material), EncodingType.ONE_HOT)
-    RL_GROUND_CONTACT_MATERIAL  = FeatureInfo("RLGroundContactMaterial", len(Material), EncodingType.ONE_HOT)
-    RR_GROUND_CONTACT_MATERIAL  = FeatureInfo("RRGroundContactMaterial", len(Material), EncodingType.ONE_HOT)
-    CUR_GEAR                    = FeatureInfo("CurGear", 6, EncodingType.ONE_HOT)
-
-    EVENT_TYPE                  = FeatureInfo("EventType", len(EventType), EncodingType.ONE_HOT)
-    BLOCK_HASH                  = FeatureInfo("BlockHash", 0, EncodingType.NONE, is_block_feature=True)  # size will be set dynamically
-
-    BLOCK_POSITION      = FeatureInfo("BlockPosition", 3, EncodingType.NUMERICAL, is_block_feature=True)
-    BLOCK_DIRECTION     = FeatureInfo("BlockDirection", len(BlockDirection), EncodingType.ONE_HOT, is_block_feature=True)
-    BLOCK_NAME          = FeatureInfo("BlockName", None, EncodingType.TOKENIZED, is_block_feature=True)  # size will be set dynamically
-    BLOCK_PAGE_NAME     = FeatureInfo("BlockPageName", None, EncodingType.TOKENIZED, is_block_feature=True)  # size will be set dynamically
-    BLOCK_MATERIAL_NAME = FeatureInfo("BlockMaterialName", None, EncodingType.TOKENIZED, is_block_feature=True)  # size will be set dynamically
-
-    _needs_reindexing = True
+    # Block features
+    BLOCK_POSITION = Feature("BlockPosition", 3, EncodingType.NUMERICAL, is_block_feature=True)
+    BLOCK_DIRECTION = Feature("BlockDirection", len(BlockDirection), EncodingType.ONE_HOT, is_block_feature=True)
+    BLOCK_NAME = Feature("BlockName", 0, EncodingType.TOKENIZED, is_block_feature=True)  # size will be set dynamically
+    BLOCK_PAGE_NAME = Feature("BlockPageName", 0, EncodingType.TOKENIZED, is_block_feature=True)  # size will be set dynamically
+    BLOCK_MATERIAL_NAME = Feature("BlockMaterialName", 0, EncodingType.TOKENIZED, is_block_feature=True)  # size will be set dynamically
 
     @classmethod
-    def get_feature_index(cls, feature: FeatureInfo, input: bool=True) -> int:
-        if cls._needs_reindexing:
-            cls._reindex_features()
-        return feature._input_index if input else feature._output_index
+    def get_all_features(cls) -> Tuple[Feature, ...]:
+        return tuple(v for k, v in cls.__dict__.items() if isinstance(v, Feature))
+
+    @classmethod
+    def get_non_block_features(cls) -> Tuple[Feature, ...]:
+        return tuple(f for f in cls.get_all_features() if not f.is_block_feature)
+
+    @classmethod
+    def get_block_features(cls) -> Tuple[Feature, ...]:
+        return tuple(f for f in cls.get_all_features() if f.is_block_feature)
     
     @classmethod
-    def set_feature_size(cls, feature: FeatureInfo, size: int):
-        if feature.size is not None:
-            raise ValueError(f"Feature {feature.name} already has a size.")
-        feature.size = size
-        cls._needs_reindexing = True
+    def get_numerical_features(cls) -> Tuple[Feature, ...]:
+        return tuple(f for f in cls.get_all_features() if f.encoding == EncodingType.NUMERICAL)
 
     @classmethod
-    def _reindex_features(cls):
-        input_idx = 0
-        output_idx = 0
-        for feature in cls.get_all_features():
-            if feature.size is None:
-                raise ValueError(f"Feature {feature.name} does not have a size yet.")
-            feature_size = 1 if feature.encoding in [EncodingType.ONE_HOT, EncodingType.TOKENIZED] else feature.size
-            feature._input_index = slice(input_idx, input_idx + feature_size)
-            input_idx += feature_size
-            
-            feature_size = 1 if feature.encoding in [EncodingType.TOKENIZED] else feature.size
-            feature._output_index = slice(output_idx, output_idx + feature_size)
-            output_idx += feature_size
-        cls._needs_reindexing = False
+    def set_feature_size(cls, feature: Feature, size: int):
+        if feature.name == "BlockDirection":
+            setattr(cls, feature.name, feature.replace(size=7)) # HACK
+        else:
+            setattr(cls, feature.name, feature.replace(size=size))
 
     @classmethod
-    def get_all_features(cls) -> List[FeatureInfo]:
-        return cls._features.copy()
+    def get_feature_index(cls, feature: Feature, input: bool = True) -> int:
+        # For simplicity, we're just returning the pre-assigned index
+        # You can add more complex logic here if needed
+        return feature.index
 
     @classmethod
-    def get_block_features(cls) -> List[FeatureInfo]:
-        return [feature for feature in cls.get_all_features() if feature.is_block_feature]
-
-    @classmethod
-    def get_numerical_features(cls) -> List[FeatureInfo]:
-         return [feature for feature in cls.get_all_features() if feature.encoding == EncodingType.NUMERICAL]
-    
-    @staticmethod
-    def get_feature_slices():
+    def get_feature_slices(cls):
+        # This assumes each feature occupies a contiguous block of indices
         slices = {}
-        current = 0
-        for feature in Features.get_all_features():
+        for feature in cls.get_all_features():
             if feature.is_block_feature:
                 continue
-            if feature.encoding in [EncodingType.ONE_HOT, EncodingType.NUMERICAL]:
-                start = current
-                end = current + feature.size
-                slices[feature.name] = slice(start, end)
-                current = end
-            elif feature.encoding == EncodingType.TOKENIZED:
-                start = current
-                end = current + 1
-                slices[feature.name] = slice(start, end)
-                current = end
+            start = cls.get_feature_index(feature)
+            end = start + feature.size
+            slices[feature.name] = slice(start, end)
         return slices
